@@ -1,0 +1,29 @@
+﻿# Dependencies
+node_modules/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Supabase local-only state (keep config and migrations tracked)
+supabase/.temp/
+supabase/.branches/
+
+# Build output and coverage
+/dist/
+/build/
+/coverage/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Local OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

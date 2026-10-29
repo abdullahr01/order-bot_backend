@@ -10,7 +10,7 @@ function required(name) {
   return value;
 }
 
-const port = Number(process.env.PORT ?? 3000);
+const port = Number(process.env.PORT ?? 4000);
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('PORT must be a whole number between 1 and 65535.');
@@ -19,10 +19,36 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 const supabaseUrl = required('SUPABASE_URL').replace(/\/$/, '');
 
 try {
-  new URL(supabaseUrl);
+  const parsedUrl = new URL(supabaseUrl);
+
+  if (!['http:', 'https:'].includes(parsedUrl.protocol) || parsedUrl.username || parsedUrl.password) {
+    throw new Error('Invalid Supabase URL');
+  }
 } catch {
-  throw new Error('SUPABASE_URL must be a valid URL.');
+  throw new Error('SUPABASE_URL must be an HTTP or HTTPS URL without embedded credentials.');
 }
+
+const corsOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean)
+  .map((origin) => {
+    try {
+      const url = new URL(origin);
+
+      if (
+        !['http:', 'https:'].includes(url.protocol) ||
+        url.username || url.password ||
+        url.pathname !== '/' || url.search || url.hash
+      ) {
+        throw new Error('Invalid CORS origin');
+      }
+
+      return url.origin;
+    } catch {
+      throw new Error('CORS_ORIGINS must contain comma-separated HTTP or HTTPS origins without paths, queries, fragments or credentials.');
+    }
+  });
 
 export const settings = Object.freeze({
   app: Object.freeze({
@@ -36,10 +62,5 @@ export const settings = Object.freeze({
     // The startup schema-root probe requires a server-only secret key.
     secretKey: required('SUPABASE_SECRET_KEY'),
   }),
-  corsOrigins: Object.freeze(
-    (process.env.CORS_ORIGINS || '')
-      .split(',')
-      .map((origin) => origin.trim())
-      .filter(Boolean),
-  ),
+  corsOrigins: Object.freeze([...new Set(corsOrigins)]),
 });

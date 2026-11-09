@@ -10,3 +10,7 @@ process.env.SUPABASE_PUBLISHABLE_KEY = 'test-publishable';
 process.env.SUPABASE_SECRET_KEY = 'test-secret';
 process.env.CORS_ORIGINS = [3000, 3001, 3002, 3003].map((port) => `http://localhost:${port}`).join(',');
 process.env.LOG_LEVEL = 'info';
+delete process.env.DATABASE_URL;
+delete process.env.DATABASE_CA_CERT_PATH;
+delete process.env.DATABASE_SSL_MODE;
+delete process.env.DATABASE_POOL_MAX;

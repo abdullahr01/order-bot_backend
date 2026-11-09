@@ -7,6 +7,8 @@ const errorCodes = new Set([
   'EAI_AGAIN', 'ETIMEDOUT', 'EPIPE', 'UND_ERR_CONNECT_TIMEOUT',
   'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET', 'CERT_HAS_EXPIRED',
   'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'DEPTH_ZERO_SELF_SIGNED_CERT',
+  '23502', '23503', '23505', '23514', '42501', '40001', '40P01', '55P03',
+  '57014', '28P01', '3D000', '42P01', '42703', '53300',
 ]);
 
 // Error messages/stacks can contain credentials, SQL or malformed JSON bodies.

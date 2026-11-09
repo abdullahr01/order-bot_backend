@@ -6,6 +6,10 @@
   "scripts": {
     "test": "node --import ./tests/setup.js --test tests/*.test.js",
     "check": "node scripts/check.js",
+    "db:inspect": "node scripts/db-inspect.js",
+    "db:plan": "node scripts/db-migrate.js",
+    "db:migrate": "node scripts/db-migrate.js --apply",
+    "test:db": "node --import dotenv/config --test --test-concurrency=1 tests/database/schema.test.js",
     "start": "node main.js",
     "dev": "nodemon main.js"
   },
@@ -21,7 +25,8 @@
     "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
     "pino": "^10.4.0",
-    "pino-http": "^11.0.0"
+    "pino-http": "^11.0.0",
+    "postgres": "^4.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14",

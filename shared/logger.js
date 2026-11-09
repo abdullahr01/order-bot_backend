@@ -9,6 +9,7 @@ const sensitiveKeys = [
   'token', 'accessToken', 'refreshToken', 'deviceToken', 'staffToken',
   'secretKey', 'publishableKey', 'dataUrl', 'body', 'query', 'payload',
   'email', 'phone', 'ownerEmail', 'ownerPhone',
+  'databaseUrl', 'connectionString', 'DATABASE_URL',
 ];
 
 export function createLogger({

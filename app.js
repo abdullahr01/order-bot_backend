@@ -12,6 +12,8 @@ export function createApp({ appLogger = logger, router } = {}) {
   const app = express();
 
   app.disable('x-powered-by');
+  // Rate limits need the real caller's IP when the API sits behind a hosting proxy.
+  app.set('trust proxy', settings.app.trustProxyHops);
   app.use(createRequestLogger(appLogger));
   app.use(helmet());
   app.use(cors({
@@ -35,5 +37,3 @@ export function createApp({ appLogger = logger, router } = {}) {
   app.use(errorHandler);
   return app;
 }
-
-export default createApp();

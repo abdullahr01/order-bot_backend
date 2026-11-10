@@ -18,6 +18,8 @@ export class Database {
 
   get sql() { return this.#sql; }
 
+  async ping() { await this.#sql`select 1`; }
+
   async withTx(work, { logger = this.#logger } = {}) {
     if (typeof work !== 'function') throw new TypeError('A transaction callback is required.');
     const log = logger.child({ module: 'Database', operation: 'transaction' });

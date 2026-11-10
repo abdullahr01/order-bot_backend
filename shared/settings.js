@@ -16,6 +16,12 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('PORT must be a whole number between 1 and 65535.');
 }
 
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+
+if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0 || trustProxyHops > 5) {
+  throw new Error('TRUST_PROXY_HOPS must be a whole number between 0 and 5.');
+}
+
 const supabaseUrl = required('SUPABASE_URL').replace(/\/$/, '');
 
 try {
@@ -55,11 +61,11 @@ export const settings = Object.freeze({
     name: 'orderbot-backend',
     environment: process.env.NODE_ENV?.trim() || 'development',
     port,
+    trustProxyHops,
   }),
   supabase: Object.freeze({
     url: supabaseUrl,
-    publishableKey: required('SUPABASE_PUBLISHABLE_KEY'),
-    // The startup schema-root probe requires a server-only secret key.
+    // Server only: Auth admin and Storage.
     secretKey: required('SUPABASE_SECRET_KEY'),
   }),
   corsOrigins: Object.freeze([...new Set(corsOrigins)]),

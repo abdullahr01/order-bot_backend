@@ -17,7 +17,7 @@ function settings(overrides = {}) {
 test('configuration defaults, origin normalization/deduplication and empty allowlist', () => {
   const defaults = settings({ PORT: undefined, NODE_ENV: undefined, CORS_ORIGINS: '' });
   assert.equal(defaults.status, 0, defaults.stderr);
-  assert.deepEqual(JSON.parse(defaults.stdout), { app: { name: 'orderbot-backend', environment: 'development', port: 4000 }, origins: [] });
+  assert.deepEqual(JSON.parse(defaults.stdout), { app: { name: 'orderbot-backend', environment: 'development', port: 4000, trustProxyHops: 0 }, origins: [] });
   const normalized = settings({ CORS_ORIGINS: ' HTTP://LOCALHOST:3000/,http://localhost:3000, https://Example.COM:443/ ' });
   assert.equal(normalized.status, 0, normalized.stderr);
   assert.deepEqual(JSON.parse(normalized.stdout).origins, ['http://localhost:3000', 'https://example.com']);
@@ -30,7 +30,14 @@ for (const port of ['', '0', '65536', '1.5', 'invalid']) {
     assert.match(result.stderr, /PORT must be a whole number/);
   });
 }
-for (const name of ['SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_SECRET_KEY']) {
+for (const hops of ['-1', '6', '1.5', 'x']) {
+  test(`configuration rejects invalid proxy hops ${hops}`, () => {
+    const result = settings({ TRUST_PROXY_HOPS: hops });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /TRUST_PROXY_HOPS must be a whole number/);
+  });
+}
+for (const name of ['SUPABASE_URL', 'SUPABASE_SECRET_KEY']) {
   test(`configuration requires ${name}`, () => {
     const result = settings({ [name]: '' });
     assert.notEqual(result.status, 0);

@@ -9,15 +9,18 @@ Module._load = function (name, ...args) {
   if (name === 'pino-pretty') throw new Error('Production must not load pino-pretty');
   return load.call(this, name, ...args);
 };
-globalThis.fetch = async () => {
-  if (process.env.TEST_PROBE_FAILURE === 'true') {
-    throw new TypeError('probe-secret-sentinel', { cause: { code: 'ENOTFOUND' } });
-  }
-  return { ok: true };
-};
 process.on('message', () => {
   process.emit('SIGTERM');
   process.disconnect();
 });
 process.channel.unref();
-await import('../../main.js');
+const { createApp } = await import('../../app.js');
+const { startServer } = await import('../../server.js');
+await startServer({
+  app: createApp(),
+  async probe() {
+    if (process.env.TEST_PROBE_FAILURE === 'true') {
+      throw new TypeError('probe-secret-sentinel', { cause: { code: 'ENOTFOUND' } });
+    }
+  },
+});

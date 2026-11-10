@@ -29,10 +29,10 @@ async function rejected(tx, work, code) {
 }
 const token = () => randomBytes(24).toString('base64url');
 
-test('all 31 tables have RLS and only the API connection can reach them', async () => {
+test('all 34 tables have RLS and only the API connection can reach them', async () => {
   const rows = await database.sql`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'dinein' and c.relkind = 'r'`;
-  assert.equal(rows.length, 31);
+  assert.equal(rows.length, 34);
   assert.ok(rows.every((row) => row.relrowsecurity));
   const [privileges] = await database.sql`select
     has_schema_privilege('anon','dinein','USAGE') as anon,
@@ -41,16 +41,46 @@ test('all 31 tables have RLS and only the API connection can reach them', async 
   assert.deepEqual({ ...privileges }, { anon: false, authenticated: false, service_role: false });
 });
 
-test('catalogue contains exact starting prices, limits and four add-ons', async () => {
-  const plans = await database.sql`select id, monthly_price, setup_fee, limits from dinein.catalog_plans order by monthly_price`;
-  assert.deepEqual(plans.map((plan) => [plan.id, plan.monthly_price, plan.setup_fee, plan.limits.tables, plan.limits.staff_accounts]),
-    [['starter',15000,30000,10,3],['growth',25000,40000,20,6],['pro',35000,50000,50,10]]);
+test('each country has its own catalogue: Pakistan confirmed, UK prices still placeholders', async () => {
+  const plans = await database.sql`select country, id, monthly_price, setup_fee, tagline, limits from dinein.catalog_plans order by country desc, monthly_price`;
+  assert.deepEqual(plans.map((plan) => [plan.country, plan.id, plan.monthly_price, plan.setup_fee, plan.limits.tables, plan.limits.staff_accounts]), [
+    ['PK','starter',15000,30000,10,3],['PK','growth',25000,40000,20,6],['PK','pro',35000,50000,50,10],
+    ['GB','starter',99,199,10,3],['GB','growth',169,299,20,6],['GB','pro',249,399,50,10],
+  ]);
+  assert.ok(plans.every((plan) => plan.tagline));
   assert.equal(plans[2].limits.stations, null);
-  const addons = await database.sql`select id, monthly_price, plan_share, available_to from dinein.catalog_addons order by id`;
-  assert.equal(addons.length, 4);
-  assert.equal(addons.find((addon) => addon.id === 'extra_branch').plan_share, 80);
-  assert.deepEqual(addons.find((addon) => addon.id === 'extra_station').available_to, ['starter']);
+  const addons = await database.sql`select country, id, monthly_price, plan_share, available_to from dinein.catalog_addons order by id`;
+  assert.equal(addons.length, 8);
+  const addon = (country, id) => addons.find((row) => row.country === country && row.id === id);
+  assert.equal(addon('PK', 'extra_tables').monthly_price, 1000);
+  assert.equal(addon('GB', 'extra_tables').monthly_price, 5);
+  assert.equal(addon('GB', 'extra_branch').plan_share, 80);
+  assert.equal(addon('GB', 'extra_branch').monthly_price, null);
+  assert.deepEqual(addon('GB', 'extra_station').available_to, ['starter']);
+  const countries = await database.sql`select country, prices_confirmed from dinein.catalog_countries order by country`;
+  assert.deepEqual(countries.map((row) => [row.country, row.prices_confirmed]), [['GB', false], ['PK', true]]);
 });
+
+test('core rules: table numbers reuse, overrides stack, waiter names, partners and countries', async () => rolledBack(async (tx) => {
+  const a = await createFixture(tx);
+  await tx`update dinein.dining_tables set active = false where id = ${a.tableId}`;
+  await tx`insert into dinein.dining_tables (tenant_id,branch_id,number,seats,token) values (${a.tenantId},${a.mainId},1,4,${token()})`;
+  await rejected(tx, (sql) => sql`insert into dinein.dining_tables (tenant_id,branch_id,number,seats,token) values (${a.tenantId},${a.mainId},1,4,${token()})`, '23505');
+  for (let i = 0; i < 2; i++) {
+    await tx`insert into dinein.tenant_overrides (tenant_id,feature_key,granted,reason,created_by) values (${a.tenantId},'time_menus',true,'Pilot offer','Test')`;
+  }
+  const [waiter] = await tx`insert into dinein.waiters (tenant_id,branch_id,name) values (${a.tenantId},${a.mainId},'Shahid') returning id`;
+  await rejected(tx, (sql) => sql`insert into dinein.waiters (tenant_id,branch_id,name) values (${a.tenantId},${a.mainId},'shahid')`, '23505');
+  await tx`update dinein.waiters set retired_at = now() where id = ${waiter.id}`;
+  await tx`insert into dinein.waiters (tenant_id,branch_id,name) values (${a.tenantId},${a.mainId},'Shahid')`;
+  const [partner] = await tx`insert into dinein.partners (name,countries,contact_name,contact_email) values ('Test partner',array['GB'],'Contact','partner@example.invalid') returning id`;
+  await tx`update dinein.tenants set country = 'GB', currency = 'GBP', timezone = 'Europe/London', tax_profile = 'gb_vat', partner_id = ${partner.id} where id = ${a.tenantId}`;
+  await tx`insert into dinein.partner_settlements (partner_id,month,amount,recorded_by) values (${partner.id},'2026-10-01',120.50,'Founder')`;
+  await rejected(tx, (sql) => sql`insert into dinein.partner_settlements (partner_id,month,amount,recorded_by) values (${partner.id},'2026-10-01',1,'Founder')`, '23505');
+  await rejected(tx, (sql) => sql`update dinein.tenants set country = 'FR' where id = ${a.tenantId}`, '23514');
+  await rejected(tx, (sql) => sql`update dinein.subscriptions set plan_id = 'gold' where tenant_id = ${a.tenantId}`, '23514');
+  await tx`insert into dinein.entitlement_events (tenant_name,action,actor,"before","after",reason,country) values ('Test partner','partner_payment_recorded','Founder',null,'2026-10: 120',null,'GB')`;
+}));
 
 test('a restaurant requires one main branch and cannot have two', async () => rolledBack(async (tx) => {
   const a = await createFixture(tx);

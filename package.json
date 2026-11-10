@@ -12,6 +12,7 @@
     "test:db": "node --import dotenv/config --test --test-concurrency=1 tests/database/*.test.js",
     "admin:create": "node scripts/admin-create.js",
     "check:signin": "node scripts/check-signin.js",
+    "dev:password": "node scripts/dev-password.js",
     "start": "node main.js",
     "dev": "nodemon main.js"
   },

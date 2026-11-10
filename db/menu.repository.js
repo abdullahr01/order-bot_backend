@@ -27,6 +27,15 @@ export class MenuRepository {
     return row.version;
   }
 
+  /** The dishes an order names, with their category's schedule and station, for pricing. */
+  async dishesForOrder(sql, tenantId, ids) {
+    return sql`
+      select i.*, c.name as category_name, c.schedule as category_schedule, c.station_id as category_station_id
+      from dinein.menu_items i
+      join dinein.menu_categories c on c.tenant_id = i.tenant_id and c.id = i.category_id
+      where i.tenant_id = ${tenantId} and i.id = any(${ids}::uuid[])`;
+  }
+
   // ---------------------------------------------------------------- Categories
 
   async categories(tx, tenantId) {

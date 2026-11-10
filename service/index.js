@@ -31,6 +31,29 @@ import { PhotoService } from './photo.service.js';
 import { PortalService } from './portal.service.js';
 import { SubscriptionService } from './subscription.service.js';
 import { TenantService } from './tenant.service.js';
+import { CounterController } from '../controller/counter.controller.js';
+import { DinerController } from '../controller/diner.controller.js';
+import { OrderController } from '../controller/order.controller.js';
+import { ServiceSettingsController } from '../controller/service-settings.controller.js';
+import { TeamController } from '../controller/team.controller.js';
+import { CounterRepository } from '../db/counter.repository.js';
+import { IdempotencyRepository } from '../db/idempotency.repository.js';
+import { OrderRepository } from '../db/order.repository.js';
+import { ServiceSettingsRepository } from '../db/service-settings.repository.js';
+import { TeamRepository } from '../db/team.repository.js';
+import { CounterRouter } from '../router/counter.router.js';
+import { DinerRouter } from '../router/diner.router.js';
+import { OrderRouter } from '../router/order.router.js';
+import { ServiceSettingsRouter } from '../router/service-settings.router.js';
+import { TeamRouter } from '../router/team.router.js';
+import { CounterService } from './counter.service.js';
+import { DinerService } from './diner.service.js';
+import { FloorService } from './floor.service.js';
+import { IdempotencyService } from './idempotency.service.js';
+import { OrderService } from './order.service.js';
+import { ServiceRequestService } from './service-request.service.js';
+import { ServiceSettingsService } from './service-settings.service.js';
+import { TeamService } from './team.service.js';
 
 /**
  * Builds the shared services once, at startup. Nothing here holds per-request state.
@@ -53,21 +76,38 @@ export function createServices({ database, verifyToken, authAdmin, photoStorage,
     verifyToken: verifyToken ?? createTokenVerifier({ supabaseUrl: settings.supabase.url }),
   }));
 
-  const tenants = new TenantService({
-    database, repository: tenantRepository, audit,
-    authAdmin: authAdmin ?? new SupabaseAuthAdmin(client()), portalUrl: settings.portalUrl,
-  });
+  const accounts = authAdmin ?? new SupabaseAuthAdmin(client());
+  const tenants = new TenantService({ database, repository: tenantRepository, audit, authAdmin: accounts, portalUrl: settings.portalUrl });
   const subscriptions = new SubscriptionService({
     database, tenants: tenantRepository, repository: new SubscriptionRepository(), audit, tenantService: tenants,
   });
   const menu = new MenuService({ database, repository: new MenuRepository(sql), supabaseUrl: settings.supabase.url });
+
   const photos = new PhotoService({ storage: photoStorage ?? new SupabasePhotoStorage(client(), settings.supabase.url) });
   const dineInSetup = new DineInSetupService({ database, repository: new DineInRepository(sql), branches: portalRepository });
+
+  // Stage 4: the service day.
+  const menuRepository = new MenuRepository(sql);
+  const orderRepository = new OrderRepository(sql);
+  const counters = new CounterService({ database, repository: new CounterRepository(sql), branches: portalRepository });
+  const team = new TeamService({
+    database, repository: new TeamRepository(sql), tenants: tenantRepository, branches: portalRepository,
+    authAdmin: accounts, portalUrl: settings.portalUrl,
+  });
+  const idempotency = new IdempotencyService({ database, repository: new IdempotencyRepository() });
+  const orders = new OrderService({ database, repository: orderRepository });
+  const floor = new FloorService({ repository: orderRepository, menu: menuRepository, branches: portalRepository, idempotency });
+  const serviceRequests = new ServiceRequestService({ database, repository: orderRepository, branches: portalRepository });
+  const serviceSettings = new ServiceSettingsService({ database, repository: new ServiceSettingsRepository(sql) });
+  const diner = new DinerService({ database, repository: orderRepository, menu: menuRepository, entitlements });
 
   const portal = express.Router();
   portal.use(new PortalRouter({ controller: new PortalController({ portal: new PortalService({ repository: portalRepository }), accessOf: access.accessOf }) }).build());
   portal.use(new MenuRouter({ controller: new MenuController({ menu, photos, accessOf: access.accessOf }), access }).build());
   portal.use(new DineInSetupRouter({ controller: new DineInSetupController({ setup: dineInSetup, accessOf: access.accessOf }), access }).build());
+  portal.use(new TeamRouter({ controller: new TeamController({ team, counters, accessOf: access.accessOf }), access }).build());
+  portal.use(new ServiceSettingsRouter({ controller: new ServiceSettingsController({ settings: serviceSettings }), access }).build());
+  portal.use(new OrderRouter({ controller: new OrderController({ orders, floor, requests: serviceRequests, accessOf: access.accessOf }), access }).build());
 
   return {
     database,
@@ -79,6 +119,8 @@ export function createServices({ database, verifyToken, authAdmin, photoStorage,
     routers: {
       admin: new TenantRouter({ controller: new TenantController({ tenants, subscriptions, entitlements }), access }).build(),
       portal,
+      counter: new CounterRouter({ controller: new CounterController({ counters }) }).build(),
+      public: new DinerRouter({ controller: new DinerController({ diner }) }).build(),
     },
   };
 }

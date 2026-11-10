@@ -39,17 +39,34 @@ class FakeAuthAdmin {
 
   constructor(tx) { this.#tx = tx; }
 
-  async inviteOwner({ email, tenantId, redirectTo }) {
+  async #invite({ email, redirectTo, appMetadata }) {
     if (this.failInvite) throw new AuthAdminError('invite', { code: this.failInvite, status: 429 });
     const id = randomUUID();
-    await this.#tx`insert into auth.users (id, email) values (${id}, ${email})`;
-    this.invited.push({ id, email, tenantId, redirectTo });
+    await this.#tx`insert into auth.users (id, email, raw_app_meta_data) values (${id}, ${email}, ${this.#tx.json(appMetadata)})`;
+    this.invited.push({ id, email, tenantId: appMetadata.tenant_id, branchId: appMetadata.branch_id ?? null, role: appMetadata.role, redirectTo });
     return id;
+  }
+
+  inviteOwner({ email, tenantId, redirectTo }) {
+    return this.#invite({ email, redirectTo, appMetadata: { role: 'tenant_owner', tenant_id: tenantId } });
+  }
+
+  inviteStaff({ email, tenantId, branchId, redirectTo }) {
+    return this.#invite({ email, redirectTo, appMetadata: { role: 'tenant_staff', tenant_id: tenantId, branch_id: branchId } });
+  }
+
+  async setStaffBranch(userId, { tenantId, branchId }) {
+    await this.#tx`update auth.users set raw_app_meta_data = ${this.#tx.json({ role: 'tenant_staff', tenant_id: tenantId, branch_id: branchId })} where id = ${userId}`;
   }
 
   async changeEmail(userId, email) { await this.#tx`update auth.users set email = ${email} where id = ${userId}`; }
 
-  async deleteUser(userId) { await this.#tx`delete from auth.users where id = ${userId}`; }
+  async deleteUser(userId) {
+    await this.#tx`delete from auth.users where id = ${userId}`;
+    this.deleted.push(userId);
+  }
+
+  deleted = [];
 }
 
 class FakePhotoStorage {
@@ -69,7 +86,15 @@ export function openHarness() {
   async function run(work) {
     try {
       await database.sql.begin(async (tx) => {
-        const testDatabase = { sql: tx, withTx: (fn) => tx.savepoint(fn), ping: async () => {}, close: async () => {} };
+        // All requests share this one connection, so their savepoints run one after
+        // another, as the database's row locks make real transactions do.
+        let queue = Promise.resolve();
+        const withTx = (fn) => {
+          const run = queue.then(() => tx.savepoint(fn));
+          queue = run.catch(() => {});
+          return run;
+        };
+        const testDatabase = { sql: tx, withTx, ping: async () => {}, close: async () => {} };
         const auth = new FakeAuthAdmin(tx);
         const photos = new FakePhotoStorage();
         const services = createServices({
@@ -120,6 +145,31 @@ export function openHarness() {
           async addBranch(tenantId, name = 'Second branch') {
             const [row] = await tx`insert into dinein.branches (tenant_id, name, area) values (${tenantId}, ${name}, 'Test area') returning id`;
             return row.id;
+          },
+
+          /** Diners: open every day, all day, so ordering tests don't depend on the clock. */
+          async openAllDay(ownerToken) {
+            const hours = Array.from({ length: 7 }, (_, day) => ({ day, open: true, opensAt: '00:00', closesAt: '00:00' }));
+            const saved = await call('PATCH', '/portal/service', { token: ownerToken, body: { hours } });
+            if (saved.status !== 200) throw new Error(`Hours not saved: ${saved.status} ${JSON.stringify(saved.body)}`);
+          },
+
+          /** Pairs a counter at a branch through the API, and returns its device token. */
+          async pairCounter(ownerToken, branchId, name = 'Front counter') {
+            const made = await call('POST', '/portal/counters/pairing-codes', { token: ownerToken, body: { branchId } });
+            const code = made.body.pairingCodes.find((entry) => entry.branchId === branchId).code;
+            const paired = await call('POST', '/counter/pair', { body: { code, name } });
+            if (paired.status !== 200) throw new Error(`Counter not paired: ${paired.status} ${JSON.stringify(paired.body)}`);
+            return paired.body.deviceToken;
+          },
+
+          /** Gives someone a PIN and unlocks a counter with it; returns a caller for /portal as that counter. */
+          async unlockCounter(ownerToken, deviceToken, userId, pin = '4321') {
+            await call('PUT', `/portal/team/${userId}/pin`, { token: ownerToken, body: { pin } });
+            const unlocked = await call('POST', '/counter/unlock', { headers: { 'x-counter-device': deviceToken }, body: { userId, pin } });
+            if (unlocked.status !== 200) throw new Error(`Counter not unlocked: ${unlocked.status} ${JSON.stringify(unlocked.body)}`);
+            const headers = { 'x-counter-device': deviceToken, authorization: `Bearer ${unlocked.body.staffToken}` };
+            return (method, path, body, extra = {}) => call(method, `/portal${path}`, { body, headers: { ...headers, ...extra } });
           },
 
           /** A staff member at one branch, and their token. */

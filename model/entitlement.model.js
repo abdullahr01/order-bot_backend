@@ -15,6 +15,14 @@ const toAddon = (row) => ({
 });
 
 export class EntitlementModel {
+  /** A country's price list from its catalogue rows. */
+  static catalog(planRows, addonRows) {
+    return {
+      plans: Object.fromEntries(planRows.map((plan) => [plan.id, toPlan(plan)])),
+      addons: Object.fromEntries(addonRows.map((addon) => [addon.id, toAddon(addon)])),
+    };
+  }
+
   static fromRow(row) {
     return {
       tenant: { id: row.id, country: row.country, currency: row.currency, timezone: row.timezone },
@@ -32,10 +40,7 @@ export class EntitlementModel {
         limitValue: override.limit_value, granted: override.granted ?? true, reason: override.reason,
         expiresAt: iso(override.expires_at), createdBy: override.created_by, createdAt: iso(override.created_at),
       })),
-      catalog: {
-        plans: Object.fromEntries(row.catalog_plans.map((plan) => [plan.id, toPlan(plan)])),
-        addons: Object.fromEntries(row.catalog_addons.map((addon) => [addon.id, toAddon(addon)])),
-      },
+      catalog: EntitlementModel.catalog(row.catalog_plans, row.catalog_addons),
     };
   }
 }

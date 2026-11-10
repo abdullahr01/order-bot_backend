@@ -56,6 +56,20 @@ const corsOrigins = (process.env.CORS_ORIGINS || '')
     }
   });
 
+// Where an owner's invite email sends them to set their password: the portal.
+// Supabase only follows it if it is in the project's Redirect URLs list.
+const portalUrl = (process.env.PORTAL_URL?.trim() || 'http://localhost:3002').replace(/\/$/, '');
+
+try {
+  const parsedUrl = new URL(portalUrl);
+
+  if (!['http:', 'https:'].includes(parsedUrl.protocol) || parsedUrl.username || parsedUrl.password || parsedUrl.search || parsedUrl.hash) {
+    throw new Error('Invalid portal URL');
+  }
+} catch {
+  throw new Error('PORTAL_URL must be an HTTP or HTTPS URL without credentials, query or fragment.');
+}
+
 export const settings = Object.freeze({
   app: Object.freeze({
     name: 'orderbot-backend',
@@ -69,4 +83,5 @@ export const settings = Object.freeze({
     secretKey: required('SUPABASE_SECRET_KEY'),
   }),
   corsOrigins: Object.freeze([...new Set(corsOrigins)]),
+  portalUrl,
 });

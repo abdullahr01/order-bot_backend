@@ -1,6 +1,7 @@
 const errorTypes = new Set([
   'Error', 'TypeError', 'SyntaxError', 'RangeError', 'ReferenceError',
   'URIError', 'AggregateError', 'AbortError', 'TimeoutError', 'ApiError',
+  'AuthAdminError', 'PhotoStorageError', 'PostgresError',
 ]);
 const errorCodes = new Set([
   'EADDRINUSE', 'EACCES', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND',

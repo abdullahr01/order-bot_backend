@@ -37,6 +37,18 @@ for (const hops of ['-1', '6', '1.5', 'x']) {
     assert.match(result.stderr, /TRUST_PROXY_HOPS must be a whole number/);
   });
 }
+test('the invite link goes to the local portal unless PORTAL_URL says otherwise', () => {
+  const read = (value) => spawnSync(process.execPath, ['--input-type=module', '-e',
+    "import { settings } from './shared/settings.js'; console.log(settings.portalUrl);"],
+  { cwd: root, env: { ...process.env, PORTAL_URL: value }, encoding: 'utf8', windowsHide: true });
+  assert.equal(read('').stdout.trim(), 'http://localhost:3002');
+  assert.equal(read('https://portal.example.com/').stdout.trim(), 'https://portal.example.com');
+  const bad = read('https://portal.example.com/?next=private-value-sentinel');
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /PORTAL_URL must be/);
+  assert.doesNotMatch(bad.stdout + bad.stderr, /private-value-sentinel/);
+});
+
 for (const name of ['SUPABASE_URL', 'SUPABASE_SECRET_KEY']) {
   test(`configuration requires ${name}`, () => {
     const result = settings({ [name]: '' });

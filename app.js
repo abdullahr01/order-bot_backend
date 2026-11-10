@@ -6,6 +6,8 @@ import { settings } from './shared/settings.js';
 import { createRequestLogger } from './middleware/request-logger.js';
 import { errorHandler, notFound } from './middleware/error-handler.js';
 
+export const PHOTO_UPLOAD_PATH = '/portal/menu/photos';
+
 // Optional router composition supports isolated features/tests without starting
 // the server or contacting Supabase. The default app has no test-only routes.
 export function createApp({ appLogger = logger, router } = {}) {
@@ -20,7 +22,9 @@ export function createApp({ appLogger = logger, router } = {}) {
     origin: settings.corsOrigins.length ? settings.corsOrigins : false,
     exposedHeaders: ['X-Request-Id'],
   }));
-  app.use(express.json({ limit: '1mb' }));
+  // Dish photos are parsed by their own route, after sign-in, with a larger limit.
+  const json = express.json({ limit: '1mb' });
+  app.use((request, response, next) => (request.path === PHOTO_UPLOAD_PATH ? next() : json(request, response, next)));
 
   app.get('/health', (request, response) => {
     request.log.info({ module: 'Health', operation: 'respond' }, 'Preparing health response');

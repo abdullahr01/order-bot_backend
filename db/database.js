@@ -1,4 +1,5 @@
 import postgres from 'postgres';
+import { ApiError } from '../shared/api-error.js';
 import baseLogger from '../shared/logger.js';
 import { databaseConfig } from './config.js';
 
@@ -33,13 +34,19 @@ export class Database {
       log.success({ durationMs: Math.round(performance.now() - started) }, 'Database transaction committed');
       return result;
     } catch (error) {
-      log.error({ err: error, durationMs: Math.round(performance.now() - started) }, 'Database transaction failed and was rolled back');
+      const durationMs = Math.round(performance.now() - started);
+      // A refused request (such as "nothing has changed") is not a database failure.
+      if (error instanceof ApiError) log.info({ code: error.code, durationMs }, 'Database transaction rolled back: request refused');
+      else log.error({ err: error, durationMs }, 'Database transaction failed and was rolled back');
       throw error;
     }
   }
 
   async close() { await this.#sql.end({ timeout: 5 }); }
 }
+
+/** A unique index rejected the write, such as two people saving the same name at once. */
+export const isUniqueViolation = (error, constraint) => error?.code === '23505' && (!constraint || error.constraint_name === constraint);
 
 // Must receive the transaction used for the order insert. No second connection.
 export async function allocateOrderNumber(tx, tenantId) {

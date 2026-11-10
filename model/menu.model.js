@@ -33,8 +33,34 @@ function uniqueIds(groups) {
   return new Set(ids).size === ids.length;
 }
 
+const iso = (value) => (value === null || value === undefined ? null : new Date(value).toISOString());
+
 export class MenuModel {
+  /** What branch staff and counters may change on a dish: whether it can be ordered today. */
+  static AVAILABILITY_FIELDS = Object.freeze(['available', 'soldOutUntil']);
+
+  /** A data URL from the portal: the photo's type and its base64 contents. */
+  static PHOTO_DATA_URL = /^data:(image\/[a-z]+);base64,([A-Za-z0-9+/]+={0,2})$/;
+
   static schedule = schedule;
+
+  static reorder = z.object({ ids: z.array(z.string()).max(1000) });
+
+  static toCategory(row) {
+    return { id: row.id, tenantId: row.tenant_id, name: row.name, position: row.position, stationId: row.station_id, schedule: row.schedule ?? null };
+  }
+
+  static toStation(row) {
+    return { id: row.id, tenantId: row.tenant_id, name: row.name, position: row.position };
+  }
+
+  static toItem(row) {
+    return {
+      id: row.id, tenantId: row.tenant_id, categoryId: row.category_id, name: row.name, description: row.description ?? '',
+      price: row.price, photoUrl: row.photo_url, available: row.available, soldOutUntil: iso(row.sold_out_until),
+      position: row.position, options: row.options ?? [], updatedAt: iso(row.updated_at),
+    };
+  }
 
   static category = z.object({
     name: z.string().trim().min(2, 'Give the category a name').max(40, 'Keep it under 40 characters'),

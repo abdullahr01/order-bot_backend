@@ -26,6 +26,15 @@ export class TenantRouter {
     router.delete('/tenants/:id/plan/scheduled', c.cancelScheduledChange);
     router.post('/tenants/:id/status', c.setStatus);
     router.post('/tenants/:id/payments', c.recordPayment);
+    router.post('/tenants/:id/addons', c.addAddon);
+    router.patch('/tenants/:id/addons/:addonId', c.setAddonQuantity);
+    router.delete('/tenants/:id/addons/:addonId', c.removeAddon);
+    // Granting access outside a plan is our own team's call, never a partner's.
+    router.post('/tenants/:id/overrides', this.#access.requireNotPartner, c.createOverride);
+    router.delete('/tenants/:id/overrides/:overrideId', this.#access.requireNotPartner, c.removeOverride);
+    router.post('/tenants/:id/branches', c.addBranch);
+    router.patch('/tenants/:id/branches/:branchId', c.updateBranch);
+    router.delete('/tenants/:id/branches/:branchId', c.removeBranch);
     return router;
   }
 }

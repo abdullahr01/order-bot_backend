@@ -50,8 +50,11 @@ export class TenantService {
 
   // ---------------------------------------------------------------- Reads
 
-  async list({ actor, log, now }, query) {
-    const params = TenantModel.listQuery(query);
+  /**
+   * Every restaurant this person sees in the country on screen, worked out once: the
+   * list's row (`summary`) and what the dashboard and monthly audit need besides.
+   */
+  async inView(actor, now) {
     const country = viewCountry(actor);
     const scope = scopeOf(actor);
     const [rows, catalogRows] = await Promise.all([
@@ -59,20 +62,31 @@ export class TenantService {
       this.#repository.catalogRows(country),
     ]);
     const catalog = EntitlementModel.catalog(catalogRows.catalog_plans, catalogRows.catalog_addons);
-
-    const summaries = rows.map((row) => {
+    const restaurants = rows.map((row) => {
       const { subscription, addons, overrides } = EntitlementModel.fromRow({ ...row, ...catalogRows });
       const live = addons.filter((addon) => isLive(addon.cancelsAt, now));
-      const tables = explainEntitlements({ subscription, addons: live, overrides, now, catalog }).limits.find((limit) => limit.key === 'tables');
+      const access = explainEntitlements({ subscription, addons: live, overrides, now, catalog });
+      const value = monthlyValue(subscription, live, now, catalog);
       return {
-        id: row.id, businessName: row.business_name, country: row.country, partnerId: row.partner_id,
-        ownerName: row.owner_name, city: row.city, planId: subscription.planId, scheduledPlanId: subscription.scheduledPlanId,
-        status: subscription.status, monthlyValue: monthlyValue(subscription, live, now, catalog), addonCount: live.length,
-        tables: { used: row.active_tables, limit: tables?.value ?? null },
-        lastOrderAt: row.last_order_at ? new Date(row.last_order_at).toISOString() : null,
-        ordersToday: row.orders_today, createdAt: new Date(row.created_at).toISOString(),
+        row, subscription, addons: live, overrides, access, monthlyValue: value,
+        usage: { tables: row.active_tables, staff_accounts: row.usage_staff, stations: row.usage_stations, branches: row.usage_branches },
+        summary: {
+          id: row.id, businessName: row.business_name, country: row.country, partnerId: row.partner_id,
+          ownerName: row.owner_name, city: row.city, planId: subscription.planId, scheduledPlanId: subscription.scheduledPlanId,
+          status: subscription.status, monthlyValue: value, addonCount: live.length,
+          tables: { used: row.active_tables, limit: access.limits.find((limit) => limit.key === 'tables')?.value ?? null },
+          lastOrderAt: row.last_order_at ? new Date(row.last_order_at).toISOString() : null,
+          ordersToday: row.orders_today, createdAt: new Date(row.created_at).toISOString(),
+        },
       };
     });
+    return { country, catalog, restaurants };
+  }
+
+  async list({ actor, log, now }, query) {
+    const params = TenantModel.listQuery(query);
+    const { country, restaurants } = await this.inView(actor, now);
+    const summaries = restaurants.map((entry) => entry.summary);
 
     // Search, plan and city narrow the set; status is applied after counting (core).
     const matching = summaries.filter((row) => (

@@ -54,6 +54,20 @@ import { OrderService } from './order.service.js';
 import { ServiceRequestService } from './service-request.service.js';
 import { ServiceSettingsService } from './service-settings.service.js';
 import { TeamService } from './team.service.js';
+import { ConsoleController } from '../controller/console.controller.js';
+import { OwnerControlController } from '../controller/owner-control.controller.js';
+import { BranchRepository } from '../db/branch.repository.js';
+import { CatalogRepository } from '../db/catalog.repository.js';
+import { ConsoleRepository } from '../db/console.repository.js';
+import { OwnerRepository } from '../db/owner.repository.js';
+import { PartnerRepository } from '../db/partner.repository.js';
+import { ConsoleRouter } from '../router/console.router.js';
+import { OwnerControlRouter } from '../router/owner-control.router.js';
+import { BranchService } from './branch.service.js';
+import { CatalogService } from './catalog.service.js';
+import { ConsoleService } from './console.service.js';
+import { OwnerControlService } from './owner-control.service.js';
+import { PartnerService } from './partner.service.js';
 
 /**
  * Builds the shared services once, at startup. Nothing here holds per-request state.
@@ -79,8 +93,9 @@ export function createServices({ database, verifyToken, authAdmin, photoStorage,
   const accounts = authAdmin ?? new SupabaseAuthAdmin(client());
   const tenants = new TenantService({ database, repository: tenantRepository, audit, authAdmin: accounts, portalUrl: settings.portalUrl });
   const subscriptions = new SubscriptionService({
-    database, tenants: tenantRepository, repository: new SubscriptionRepository(), audit, tenantService: tenants,
+    database, tenants: tenantRepository, repository: new SubscriptionRepository(), audit, tenantService: tenants, entitlements,
   });
+  const branches = new BranchService({ database, repository: new BranchRepository(), tenants: tenantRepository, tenantService: tenants, audit, entitlements });
   const menu = new MenuService({ database, repository: new MenuRepository(sql), supabaseUrl: settings.supabase.url });
 
   const photos = new PhotoService({ storage: photoStorage ?? new SupabasePhotoStorage(client(), settings.supabase.url) });
@@ -109,6 +124,18 @@ export function createServices({ database, verifyToken, authAdmin, photoStorage,
   portal.use(new ServiceSettingsRouter({ controller: new ServiceSettingsController({ settings: serviceSettings }), access }).build());
   portal.use(new OrderRouter({ controller: new OrderController({ orders, floor, requests: serviceRequests, accessOf: access.accessOf }), access }).build());
 
+  // Stage 5: owner figures, the rest of the console, partners.
+  const catalogRepository = new CatalogRepository(sql);
+  const consoleService = new ConsoleService({ database, repository: new ConsoleRepository(sql), tenants, catalogs: catalogRepository, entitlements });
+  const catalog = new CatalogService({ database, repository: catalogRepository, audit });
+  const partners = new PartnerService({ database, repository: new PartnerRepository(sql), audit });
+  const owner = new OwnerControlService({ database, repository: new OwnerRepository(sql) });
+  portal.use(new OwnerControlRouter({ controller: new OwnerControlController({ owner, console: consoleService, accessOf: access.accessOf }), access }).build());
+
+  const admin = express.Router();
+  admin.use(new TenantRouter({ controller: new TenantController({ tenants, subscriptions, entitlements, branches }), access }).build());
+  admin.use(new ConsoleRouter({ controller: new ConsoleController({ console: consoleService, catalog, partners }) }).build());
+
   return {
     database,
     entitlements,
@@ -117,7 +144,7 @@ export function createServices({ database, verifyToken, authAdmin, photoStorage,
     access,
     limits: limits ?? createRateLimits(),
     routers: {
-      admin: new TenantRouter({ controller: new TenantController({ tenants, subscriptions, entitlements }), access }).build(),
+      admin,
       portal,
       counter: new CounterRouter({ controller: new CounterController({ counters }) }).build(),
       public: new DinerRouter({ controller: new DinerController({ diner }) }).build(),

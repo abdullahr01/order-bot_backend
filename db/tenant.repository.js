@@ -22,16 +22,32 @@ export class TenantRepository {
     return row;
   }
 
-  /** Every restaurant on screen: one country, and only a partner's own when the caller is one. */
+  /**
+   * Every restaurant on screen: one country, and only a partner's own when the caller is
+   * one. With what the list, the dashboard and the monthly audit need about each.
+   */
   async listInView({ country, partnerId }) {
     return this.#sql`
       select t.id, t.business_name, t.country, t.partner_id, t.owner_name, t.city, t.currency, t.timezone,
         t.created_at, t.last_order_at, ${SUBSCRIPTION_COLUMNS(this.#sql)}, ${ENTITLEMENT_JSON(this.#sql)},
         (select count(*)::int from dinein.dining_tables d where d.tenant_id = t.id and d.active) as active_tables,
-        (select count(*)::int from dinein.orders o
-          where o.tenant_id = t.id and o.business_day = (now() at time zone t.timezone)::date) as orders_today
+        (select count(*)::int from dinein.team_members m where m.tenant_id = t.id) as usage_staff,
+        (select count(*)::int + 1 from dinein.stations st where st.tenant_id = t.id) as usage_stations,
+        (select count(*)::int from dinein.branches b where b.tenant_id = t.id and b.retired_at is null) as usage_branches,
+        exists (select 1 from dinein.payments p where p.tenant_id = t.id and p.kind = 'setup') as setup_paid,
+        today.orders_today, today.orders_yesterday, today.orders_week, today.lines_today, today.diner_lines_today
       from dinein.tenants t
       join dinein.subscriptions s on s.tenant_id = t.id
+      cross join lateral (
+        select
+          count(*) filter (where o.business_day = d.today)::int as orders_today,
+          count(*) filter (where o.business_day = d.today - 1)::int as orders_yesterday,
+          count(*) filter (where o.business_day > d.today - 7)::int as orders_week,
+          coalesce(sum(jsonb_array_length(o.items)) filter (where o.business_day = d.today and o.status <> 'cancelled'), 0)::int as lines_today,
+          coalesce(sum(jsonb_array_length(o.items)) filter (where o.business_day = d.today and o.status <> 'cancelled' and o.entered_by = 'customer'), 0)::int as diner_lines_today
+        from (select (now() at time zone t.timezone)::date as today) d
+        left join dinein.orders o on o.tenant_id = t.id and o.business_day > d.today - 7
+      ) today
       where t.country = ${country} and (${partnerId}::uuid is null or t.partner_id = ${partnerId}::uuid)`;
   }
 

@@ -7,11 +7,13 @@ export class TenantController {
   #tenants;
   #subscriptions;
   #entitlements;
+  #branches;
 
-  constructor({ tenants, subscriptions, entitlements }) {
+  constructor({ tenants, subscriptions, entitlements, branches }) {
     this.#tenants = tenants;
     this.#subscriptions = subscriptions;
     this.#entitlements = entitlements;
+    this.#branches = branches;
   }
 
   list = async (request, response) => {
@@ -61,6 +63,23 @@ export class TenantController {
     context.log.info({ tenantId: request.params.id }, 'Changing status');
     response.json(await this.#subscriptions.setStatus(context, request.params.id, request.body ?? {}));
   };
+
+  #write(operation, call) {
+    return async (request, response) => {
+      const context = requestContext(request, MODULE, operation);
+      context.log.info({ tenantId: request.params.id }, 'Console change');
+      response.json(await call(context, request));
+    };
+  }
+
+  addAddon = this.#write('addAddon', (context, request) => this.#subscriptions.addAddon(context, request.params.id, request.body ?? {}));
+  setAddonQuantity = this.#write('setAddonQuantity', (context, request) => this.#subscriptions.setAddonQuantity(context, request.params.id, request.params.addonId, request.body ?? {}));
+  removeAddon = this.#write('removeAddon', (context, request) => this.#subscriptions.removeAddon(context, request.params.id, request.params.addonId, request.body ?? {}));
+  createOverride = this.#write('createOverride', (context, request) => this.#subscriptions.createOverride(context, request.params.id, request.body ?? {}));
+  removeOverride = this.#write('removeOverride', (context, request) => this.#subscriptions.removeOverride(context, request.params.id, request.params.overrideId, request.body ?? {}));
+  addBranch = this.#write('addBranch', (context, request) => this.#branches.add(context, request.params.id, request.body));
+  updateBranch = this.#write('updateBranch', (context, request) => this.#branches.update(context, request.params.id, request.params.branchId, request.body));
+  removeBranch = this.#write('removeBranch', (context, request) => this.#branches.remove(context, request.params.id, request.params.branchId, request.body ?? {}));
 
   recordPayment = async (request, response) => {
     const context = requestContext(request, MODULE, 'recordPayment');

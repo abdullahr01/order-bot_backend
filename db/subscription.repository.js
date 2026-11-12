@@ -64,6 +64,54 @@ export class SubscriptionRepository {
       values (${tenantId}, ${kind}, ${`${month}-01`}::date, ${amount}, ${method}, ${reference}, ${recordedBy}, ${now})`;
   }
 
+  // ---------------------------------------------------------------- Add-ons
+
+  /** Adds an add-on, or starts a fresh one over a row whose removal already took effect. */
+  async upsertAddon(tx, tenantId, addonId, quantity, now) {
+    await tx`insert into dinein.tenant_addons (tenant_id, addon_id, quantity, activated_at, cancels_at)
+      values (${tenantId}, ${addonId}, ${quantity}, ${now}, null)
+      on conflict (tenant_id, addon_id) do update set quantity = excluded.quantity, activated_at = excluded.activated_at, cancels_at = null`;
+  }
+
+  async setAddon(tx, tenantId, addonId, { quantity, cancelsAt }) {
+    await tx`update dinein.tenant_addons set
+        quantity = coalesce(${quantity ?? null}::int, quantity),
+        cancels_at = ${cancelsAt === undefined ? tx`cancels_at` : tx`${cancelsAt}::timestamptz`}
+      where tenant_id = ${tenantId} and addon_id = ${addonId}`;
+  }
+
+  /** What the restaurant uses now, the numbers each limit is checked against. */
+  async usage(tx, tenantId) {
+    const [row] = await tx`
+      select
+        (select count(*)::int from dinein.dining_tables where tenant_id = ${tenantId} and active) as tables,
+        (select count(*)::int from dinein.team_members where tenant_id = ${tenantId}) as staff_accounts,
+        (select count(*)::int + 1 from dinein.stations where tenant_id = ${tenantId}) as stations,
+        (select count(*)::int from dinein.branches where tenant_id = ${tenantId} and retired_at is null) as branches`;
+    return row;
+  }
+
+  // ---------------------------------------------------------------- Overrides
+
+  /** A new override on the same subject ends the old one: rows are ended, never deleted. */
+  async replaceOverride(tx, tenantId, { featureKey = null, limitKey = null, limitValue = null, granted = null, reason, expiresAt, createdBy, now }) {
+    await tx`update dinein.tenant_overrides set expires_at = ${now}
+      where tenant_id = ${tenantId} and (expires_at is null or expires_at > ${now})
+        and ${featureKey ? tx`feature_key = ${featureKey}` : tx`limit_key = ${limitKey}`}`;
+    await tx`insert into dinein.tenant_overrides (tenant_id, feature_key, limit_key, limit_value, granted, reason, expires_at, created_by, created_at)
+      values (${tenantId}, ${featureKey}, ${limitKey}, ${limitValue}, ${granted}, ${reason}, ${expiresAt}, ${createdBy}, ${now})`;
+  }
+
+  async liveOverride(tx, tenantId, id, now) {
+    const [row] = await tx`select * from dinein.tenant_overrides
+      where tenant_id = ${tenantId} and id = ${id} and (expires_at is null or expires_at > ${now}) for update`;
+    return row ?? null;
+  }
+
+  async endOverride(tx, tenantId, id, now) {
+    await tx`update dinein.tenant_overrides set expires_at = ${now} where tenant_id = ${tenantId} and id = ${id}`;
+  }
+
   /** Live add-ons (not ending), for working out which a new plan drops. */
   async liveAddons(tx, tenantId, now) {
     return tx`select addon_id, quantity, activated_at, cancels_at from dinein.tenant_addons

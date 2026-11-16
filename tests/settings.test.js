@@ -49,6 +49,36 @@ test('the invite link goes to the local portal unless PORTAL_URL says otherwise'
   assert.doesNotMatch(bad.stdout + bad.stderr, /private-value-sentinel/);
 });
 
+test('email is off without SMTP_HOST, and needs the user, password and sender with it; secrets never printed', () => {
+  const read = (overrides) => {
+    const env = { ...process.env, ...overrides };
+    for (const [name, value] of Object.entries(env)) if (value === undefined) delete env[name];
+    return spawnSync(process.execPath, ['--input-type=module', '-e',
+      "import { settings } from './shared/settings.js'; console.log(JSON.stringify({ mail: settings.mail && { ...settings.mail, password: settings.mail.password ? 'set' : '' }, jobs: settings.jobsEnabled }));"],
+    { cwd: root, env, encoding: 'utf8', windowsHide: true });
+  };
+  const off = read({ SMTP_HOST: undefined });
+  assert.equal(off.status, 0, off.stderr);
+  assert.deepEqual(JSON.parse(off.stdout), { mail: null, jobs: false });
+  const full = { SMTP_HOST: 'smtp.example.com', SMTP_USER: 'sender@example.com', SMTP_PASSWORD: 'private-value-sentinel', MAIL_FROM: 'QR Dine-in <sender@example.com>' };
+  const on = read(full);
+  assert.equal(on.status, 0, on.stderr);
+  assert.deepEqual(JSON.parse(on.stdout).mail, { host: 'smtp.example.com', port: 587, user: 'sender@example.com', password: 'set', from: 'QR Dine-in <sender@example.com>' });
+  for (const missing of ['SMTP_USER', 'SMTP_PASSWORD', 'MAIL_FROM']) {
+    const result = read({ ...full, [missing]: '' });
+    assert.notEqual(result.status, 0);
+    assert.ok(result.stderr.includes(`Required environment variable ${missing} is missing`));
+  }
+  for (const [name, value] of [['SMTP_PORT', '70000'], ['MAIL_FROM', 'not an address'], ['JOBS_ENABLED', 'yes']]) {
+    const result = read({ ...full, [name]: value });
+    assert.notEqual(result.status, 0, `${name}=${value}`);
+    assert.doesNotMatch(result.stdout + result.stderr, /private-value-sentinel/);
+  }
+  assert.equal(JSON.parse(read({ NODE_ENV: 'production' }).stdout).jobs, true);
+  assert.equal(JSON.parse(read({ NODE_ENV: 'production', JOBS_ENABLED: 'false' }).stdout).jobs, false);
+  assert.equal(JSON.parse(read({ JOBS_ENABLED: 'true' }).stdout).jobs, true);
+});
+
 for (const name of ['SUPABASE_URL', 'SUPABASE_SECRET_KEY']) {
   test(`configuration requires ${name}`, () => {
     const result = settings({ [name]: '' });

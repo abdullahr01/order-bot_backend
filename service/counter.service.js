@@ -3,6 +3,7 @@ import { COUNTER_PIN_LENGTH, PAIRING_CODE_MINUTES } from '../shared/rules/consta
 import { hashToken, newPairingCode, randomToken, verifyPin } from '../shared/crypto.js';
 import { apiError } from '../shared/error-codes.js';
 import { isUuid } from '../shared/validation.js';
+import { NO_LIVE } from './live.service.js';
 
 const MINUTE = 60_000;
 /** Wrong PINs in a row before that person is held off (guide 3.2, §13). */
@@ -27,7 +28,10 @@ export class CounterService {
   #repository;
   #branches;
 
-  constructor({ database, repository, branches }) {
+  #live;
+
+  constructor({ database, repository, branches, live = NO_LIVE }) {
+    this.#live = live;
     this.#database = database;
     this.#repository = repository;
     this.#branches = branches;
@@ -67,6 +71,7 @@ export class CounterService {
     const removed = isUuid(id) && await this.#database.withTx((tx) => this.#repository.remove(tx, actor.tenantId, id), { logger: log });
     if (!removed) throw apiError('not_found', 'That counter could not be found.');
     log.success({ tenantId: actor.tenantId, deviceId: id }, 'Counter unpaired');
+    this.#live.deviceRemoved({ tenantId: actor.tenantId, deviceId: id });
     return this.list(context);
   }
 

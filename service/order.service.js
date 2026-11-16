@@ -5,6 +5,7 @@ import { canTransition, MIN_CANCEL_REASON_LENGTH } from '../shared/rules/orders.
 import { apiError } from '../shared/error-codes.js';
 import { startOfLocalDay } from '../shared/time.js';
 import { isUuid } from '../shared/validation.js';
+import { NO_LIVE } from './live.service.js';
 
 const RANGE_DAYS = { today: 1, '7d': 7, '30d': 30 };
 const STATUS_WORDS = { new: 'new', accepted: 'with a waiter', served: 'served', cancelled: 'cancelled' };
@@ -34,7 +35,10 @@ export class OrderService {
   #database;
   #repository;
 
-  constructor({ database, repository }) {
+  #live;
+
+  constructor({ database, repository, live = NO_LIVE }) {
+    this.#live = live;
     this.#database = database;
     this.#repository = repository;
   }
@@ -106,6 +110,7 @@ export class OrderService {
       return saved;
     }, { logger: log });
     log.success({ tenantId: actor.tenantId, orderId: updated.id, number: updated.number, status }, 'Order status changed');
+    this.#live.orderUpdated({ branchId: updated.branch_id, tableId: updated.table_id, orderId: updated.id });
     return OrderModel.toOrder(updated);
   }
 }

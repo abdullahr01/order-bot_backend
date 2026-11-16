@@ -4,6 +4,7 @@
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { WebSocket } from 'ws';
 import { createApp } from '../../app.js';
 import { AuthAdminError } from '../../db/auth-admin.js';
 import { assertDevelopmentTarget } from '../../db/config.js';
@@ -71,10 +72,36 @@ class FakeAuthAdmin {
 
 class FakePhotoStorage {
   uploads = [];
+  removed = [];
 
-  async upload(path, buffer) {
-    this.uploads.push({ path, buffer });
-    return `${settings.supabase.url}/storage/v1/object/public/${PHOTO_BUCKET}/${path}`;
+  #url(path) { return `${settings.supabase.url}/storage/v1/object/public/${PHOTO_BUCKET}/${path}`; }
+
+  async upload(path, buffer, createdAt = new Date()) {
+    this.uploads.push({ path, buffer, createdAt });
+    return this.#url(path);
+  }
+
+  async folders() { return [...new Set(this.uploads.map((file) => file.path.split('/')[0]))]; }
+
+  async files(folder) {
+    return this.uploads.filter((file) => file.path.startsWith(`${folder}/`))
+      .map((file) => ({ path: file.path, url: this.#url(file.path), createdAt: file.createdAt }));
+  }
+
+  async remove(paths) {
+    this.removed.push(...paths);
+    this.uploads = this.uploads.filter((file) => !paths.includes(file.path));
+  }
+}
+
+/** Stands in for the SMTP sender: keeps what would have been sent. */
+class FakeMailer {
+  sent = [];
+  fail = false;
+
+  async send(message) {
+    if (this.fail) throw Object.assign(new Error('SMTP refused'), { name: 'MailError', code: 'ECONNECTION' });
+    this.sent.push(message);
   }
 }
 
@@ -97,13 +124,43 @@ export function openHarness() {
         const testDatabase = { sql: tx, withTx, ping: async () => {}, close: async () => {} };
         const auth = new FakeAuthAdmin(tx);
         const photos = new FakePhotoStorage();
+        const mailer = new FakeMailer();
         const services = createServices({
-          database: testDatabase, verifyToken, authAdmin: auth, photoStorage: photos,
+          database: testDatabase, verifyToken, authAdmin: auth, photoStorage: photos, mailer, logger: silent, livePingMs: 200,
           limits: createRateLimits({ dinerReads: { limit: 1000, windowMs: 60_000 }, pairing: { limit: 1000, windowMs: 60_000 } }),
         });
         const server = createApp({ appLogger: silent, router: createApiRouter(services) }).listen(0, '127.0.0.1');
+        services.live.lines.attach(server);
         await once(server, 'listening');
         const base = `http://127.0.0.1:${server.address().port}`;
+        const openLines = [];
+
+        /** Opens a live line, sends the hello, and collects what arrives. */
+        async function listen(hello) {
+          const ws = new WebSocket(`${base.replace('http', 'ws')}/live`);
+          openLines.push(ws);
+          const messages = [];
+          const closed = new Promise((resolve) => ws.on('close', (code, reason) => resolve({ code, reason: reason.toString() })));
+          ws.on('error', () => {});
+          ws.on('message', (data) => messages.push(JSON.parse(data.toString())));
+          await once(ws, 'open');
+          ws.send(JSON.stringify(hello));
+          const wait = async (match, what) => {
+            for (let tries = 0; tries < 250; tries += 1) {
+              const found = messages.find((message) => !message.seen && match(message));
+              if (found) { found.seen = true; return found; }
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            throw new Error(`No ${what} arrived; got ${JSON.stringify(messages)}`);
+          };
+          const line = {
+            ws, messages, closed,
+            ready: () => wait((message) => message.type === 'ready', 'ready'),
+            event: (name) => wait((message) => message.type === 'event' && (!name || message.event === name), name ?? 'event'),
+            events: () => messages.filter((message) => message.type === 'event'),
+          };
+          return line;
+        }
 
         async function call(method, path, { token, body, headers = {} } = {}) {
           const response = await fetch(`${base}${path}`, {
@@ -116,7 +173,7 @@ export function openHarness() {
         }
 
         const api = {
-          sql: tx, auth, photos, call,
+          sql: tx, auth, photos, mailer, call, listen, jobs: services.jobs, live: services.live.hub,
           admin: (scope = FOUNDER, { aal = 'aal2', name = 'Test founder' } = {}) => sign(randomUUID(), {
             email: 'founder@example.invalid', aal, app_metadata: { role: 'super_admin', admin_scope: scope, name },
           }),
@@ -186,6 +243,8 @@ export function openHarness() {
         try {
           await work(api);
         } finally {
+          for (const ws of openLines) ws.terminate();
+          await services.live.lines.close();
           server.closeAllConnections();
           await new Promise((resolve) => server.close(resolve));
         }

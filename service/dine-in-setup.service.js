@@ -4,6 +4,7 @@ import { DineInModel } from '../model/dine-in.model.js';
 import { newTableToken } from '../shared/crypto.js';
 import { apiError } from '../shared/error-codes.js';
 import { isUuid } from '../shared/validation.js';
+import { NO_LIVE } from './live.service.js';
 
 const fieldError = (fields) => apiError('validation_failed', 'Check the highlighted fields.', fields);
 const TABLE_NOT_FOUND = () => apiError('not_found', 'That table could not be found.');
@@ -19,7 +20,10 @@ export class DineInSetupService {
   #repository;
   #branches;
 
-  constructor({ database, repository, branches }) {
+  #live;
+
+  constructor({ database, repository, branches, live = NO_LIVE }) {
+    this.#live = live;
     this.#database = database;
     this.#repository = repository;
     this.#branches = branches;
@@ -41,14 +45,18 @@ export class DineInSetupService {
   }
 
   async #write(context, access, operation, work) {
+    let outcome;
     try {
-      await this.#database.withTx((tx) => work(tx, context.actor.tenantId), { logger: context.log });
+      await this.#database.withTx(async (tx) => { outcome = await work(tx, context.actor.tenantId); }, { logger: context.log });
     } catch (error) {
       if (isUniqueViolation(error, 'dining_tables_active_number')) throw fieldError({ number: 'That table number is already in use at this branch.' });
       if (isUniqueViolation(error, 'waiters_name_unique')) throw fieldError({ name: 'Already on the list.' });
       throw error;
     }
     context.log.success({ tenantId: context.actor.tenantId, operation }, 'Dine-in setup saved');
+    // The counters' floor and waiter lists; phones on a retired or replaced QR code are cut off.
+    this.#live.setupChanged({ tenantId: context.actor.tenantId });
+    if (outcome?.retiredTableId) this.#live.tableRetired({ tenantId: context.actor.tenantId, tableId: outcome.retiredTableId });
     return this.setup(context, access);
   }
 
@@ -105,6 +113,7 @@ export class DineInSetupService {
         if (limit !== null && inUse >= limit) throw tableLimit(limit);
       }
       await this.#repository.updateTable(tx, tenantId, table.id, { ...value, active });
+      return active ? null : { retiredTableId: table.id };
     });
   }
 
@@ -113,6 +122,7 @@ export class DineInSetupService {
     return this.#write(context, access, 'replaceTableToken', async (tx, tenantId) => {
       const table = await this.#table(tx, context.actor, id);
       await this.#repository.replaceToken(tx, tenantId, table.id, newTableToken());
+      return { retiredTableId: table.id };
     });
   }
 

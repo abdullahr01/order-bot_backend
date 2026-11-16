@@ -9,6 +9,7 @@ import { addonsEndingOnPlan, addonState, missingForGrant, planChangeKind, requir
 import { apiError } from '../shared/error-codes.js';
 import { monthKey } from '../shared/time.js';
 import { isUuid, requireReason } from '../shared/validation.js';
+import { NO_LIVE } from './live.service.js';
 
 const ALREADY_PAID_SETUP = () => apiError('already_paid', 'The setup fee is already recorded.');
 const ALREADY_PAID_MONTH = () => apiError('already_paid', 'A payment is already recorded for this month.');
@@ -23,7 +24,10 @@ export class SubscriptionService {
 
   #entitlements;
 
-  constructor({ database, tenants, repository, audit, tenantService, entitlements }) {
+  #live;
+
+  constructor({ database, tenants, repository, audit, tenantService, entitlements, live = NO_LIVE }) {
+    this.#live = live;
     this.#database = database;
     this.#tenants = tenants;
     this.#repository = repository;
@@ -69,6 +73,7 @@ export class SubscriptionService {
       await this.#audit.record(tx, { tenantId, action: 'addon_added', actor: actor.name, after: `${def.name} × ${quantity}`, reason });
     }, { logger: log });
     log.success({ tenantId, addonId: body.addonId }, 'Add-on added');
+    this.#live.tenantChanged(tenantId);
     return this.#tenantService.detail(tenantId, now);
   }
 
@@ -98,6 +103,7 @@ export class SubscriptionService {
       await this.#audit.record(tx, { tenantId, action: 'limit_changed', actor: actor.name, before: `${addon.quantity} ${unit(addon.quantity)}`, after: `${quantity} ${unit(quantity)}`, reason });
     }, { logger: log });
     log.success({ tenantId, addonId }, 'Add-on quantity changed');
+    this.#live.tenantChanged(tenantId);
     return this.#tenantService.detail(tenantId, now);
   }
 
@@ -153,6 +159,7 @@ export class SubscriptionService {
       await this.#audit.record(tx, { tenantId, action: event.action, featureKey: event.featureKey ?? null, actor: actor.name, before: event.before ?? null, after: event.after, reason });
     }, { logger: log });
     log.success({ tenantId, action: event.action }, 'Override saved');
+    this.#live.tenantChanged(tenantId);
     return this.#tenantService.detail(tenantId, now);
   }
 
@@ -169,6 +176,7 @@ export class SubscriptionService {
       await this.#audit.record(tx, { tenantId, action: 'override_removed', featureKey: override.feature_key, actor: actor.name, before: what, after: 'Back to plan default', reason });
     }, { logger: log });
     log.success({ tenantId, overrideId }, 'Override removed');
+    this.#live.tenantChanged(tenantId);
     return this.#tenantService.detail(tenantId, now);
   }
 
@@ -210,6 +218,7 @@ export class SubscriptionService {
       outcome = ending.length ? `applied, ${ending.length} add-on(s) ended` : 'applied';
     }, { logger: log });
     log.success({ tenantId, planId: body.planId, outcome }, 'Plan change saved');
+    this.#live.tenantChanged(tenantId);
     return this.#tenantService.detail(tenantId, now);
   }
 
@@ -249,6 +258,7 @@ export class SubscriptionService {
       });
     }, { logger: log });
     log.success({ tenantId, status: body.status, ...(stopped ? { cancelledOrders: stopped.orders, closedTables: stopped.tables } : {}) }, 'Status changed');
+    this.#live.tenantChanged(tenantId, { cancelled: body.status === 'cancelled' });
     return this.#tenantService.detail(tenantId, now);
   }
 
@@ -298,6 +308,7 @@ export class SubscriptionService {
       throw error;
     }
     log.success({ tenantId, kind, method: body.method, backToActive: reactivated }, 'Payment recorded');
+    if (reactivated) this.#live.tenantChanged(tenantId);
     return this.#tenantService.detail(tenantId, now);
   }
 }

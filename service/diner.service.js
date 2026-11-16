@@ -7,6 +7,7 @@ import { itemAvailability, scheduleOpen, scheduleText } from '../shared/rules/me
 import { defaultHours, openStatus } from '../shared/rules/service.js';
 import { apiError } from '../shared/error-codes.js';
 import { priceLines } from './order-pricing.js';
+import { NO_LIVE } from './live.service.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 /** Orders one party can send in an hour (guide §13). A real party never gets near it; a prank does. */
@@ -33,7 +34,10 @@ export class DinerService {
   #menu;
   #entitlements;
 
-  constructor({ database, repository, menu, entitlements }) {
+  #live;
+
+  constructor({ database, repository, menu, entitlements, live = NO_LIVE }) {
+    this.#live = live;
     this.#database = database;
     this.#repository = repository;
     this.#menu = menu;
@@ -137,11 +141,14 @@ export class DinerService {
       // After the bill was asked for, another round reopens the table.
       if (session.status === 'bill_requested') await this.#repository.setSession(tx, row.tenant_id, session.id, { status: 'open' });
       if (clientRef) await this.#repository.saveClientRef(tx, { clientRef, tenantId: row.tenant_id, branchId: row.branch_id, orderId: order.id });
-      return { tenantId: row.tenant_id, orderId: order.id, number, status: order.status, lines: items.length };
+      return { tenantId: row.tenant_id, branchId: row.branch_id, tableId: row.id, orderId: order.id, number, status: order.status, lines: items.length };
     }, { logger: log });
 
     if (placed.repeated) log.info({ tenantId: placed.tenantId }, 'Repeated diner order: already placed');
-    else log.success({ tenantId: placed.tenantId, orderId: placed.orderId, number: placed.number, status: placed.status, lines: placed.lines }, 'Diner order placed');
+    else {
+      log.success({ tenantId: placed.tenantId, orderId: placed.orderId, number: placed.number, status: placed.status, lines: placed.lines }, 'Diner order placed');
+      this.#live.orderCreated({ branchId: placed.branchId, tableId: placed.tableId, orderId: placed.orderId });
+    }
     return this.page(token, now);
   }
 
@@ -162,9 +169,10 @@ export class DinerService {
         tenantId: row.tenant_id, branchId: row.branch_id, tableId: row.id, tableNumber: row.number, sessionId: session.id, kind, now,
       });
       if (added && kind === 'bill') await this.#repository.setSession(tx, row.tenant_id, session.id, { status: 'bill_requested', billRequestedAt: now });
-      return { tenantId: row.tenant_id, added };
+      return { tenantId: row.tenant_id, branchId: row.branch_id, tableId: row.id, added };
     }, { logger: log });
     log.success({ tenantId: result.tenantId, kind, added: result.added }, 'Diner request received');
+    if (result.added) this.#live.requestCreated({ branchId: result.branchId, tableId: result.tableId });
     return this.page(token, now);
   }
 }

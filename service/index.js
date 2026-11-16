@@ -68,13 +68,19 @@ import { CatalogService } from './catalog.service.js';
 import { ConsoleService } from './console.service.js';
 import { OwnerControlService } from './owner-control.service.js';
 import { PartnerService } from './partner.service.js';
+import { LiveController } from '../controller/live.controller.js';
+import { JobRepository } from '../db/job.repository.js';
+import { SmtpMailer } from '../db/smtp-mailer.js';
+import baseLogger from '../shared/logger.js';
+import { JobService } from './job.service.js';
+import { LiveHub } from './live.service.js';
 
 /**
  * Builds the shared services once, at startup. Nothing here holds per-request state.
  * Tests pass their own token verifier, Auth admin and photo storage, so they never
  * create real Supabase accounts or files.
  */
-export function createServices({ database, verifyToken, authAdmin, photoStorage, limits } = {}) {
+export function createServices({ database, verifyToken, authAdmin, photoStorage, limits, mailer, logger = baseLogger, livePingMs } = {}) {
   const sql = database.sql;
   let supabase;
   const client = () => (supabase ??= createSupabaseAdmin());
@@ -85,36 +91,41 @@ export function createServices({ database, verifyToken, authAdmin, photoStorage,
   const audit = new AuditService();
   const entitlements = new EntitlementService({ repository: new EntitlementRepository(sql) });
   const access = createAccessMiddleware({ entitlements, authRepository });
-  const auth = createAuthMiddleware(new AuthService({
+  const authService = new AuthService({
     repository: authRepository,
     verifyToken: verifyToken ?? createTokenVerifier({ supabaseUrl: settings.supabase.url }),
-  }));
+  });
+  const auth = createAuthMiddleware(authService);
+  // Stage 6: live updates. Services announce changes after they are saved.
+  const live = new LiveHub();
 
   const accounts = authAdmin ?? new SupabaseAuthAdmin(client());
   const tenants = new TenantService({ database, repository: tenantRepository, audit, authAdmin: accounts, portalUrl: settings.portalUrl });
+  const subscriptionRepository = new SubscriptionRepository();
   const subscriptions = new SubscriptionService({
-    database, tenants: tenantRepository, repository: new SubscriptionRepository(), audit, tenantService: tenants, entitlements,
+    database, tenants: tenantRepository, repository: subscriptionRepository, audit, tenantService: tenants, entitlements, live,
   });
   const branches = new BranchService({ database, repository: new BranchRepository(), tenants: tenantRepository, tenantService: tenants, audit, entitlements });
-  const menu = new MenuService({ database, repository: new MenuRepository(sql), supabaseUrl: settings.supabase.url });
+  const menu = new MenuService({ database, repository: new MenuRepository(sql), supabaseUrl: settings.supabase.url, live });
 
-  const photos = new PhotoService({ storage: photoStorage ?? new SupabasePhotoStorage(client(), settings.supabase.url) });
-  const dineInSetup = new DineInSetupService({ database, repository: new DineInRepository(sql), branches: portalRepository });
+  const storage = photoStorage ?? new SupabasePhotoStorage(client(), settings.supabase.url);
+  const photos = new PhotoService({ storage });
+  const dineInSetup = new DineInSetupService({ database, repository: new DineInRepository(sql), branches: portalRepository, live });
 
   // Stage 4: the service day.
   const menuRepository = new MenuRepository(sql);
   const orderRepository = new OrderRepository(sql);
-  const counters = new CounterService({ database, repository: new CounterRepository(sql), branches: portalRepository });
+  const counters = new CounterService({ database, repository: new CounterRepository(sql), branches: portalRepository, live });
   const team = new TeamService({
     database, repository: new TeamRepository(sql), tenants: tenantRepository, branches: portalRepository,
-    authAdmin: accounts, portalUrl: settings.portalUrl,
+    authAdmin: accounts, portalUrl: settings.portalUrl, live,
   });
   const idempotency = new IdempotencyService({ database, repository: new IdempotencyRepository() });
-  const orders = new OrderService({ database, repository: orderRepository });
-  const floor = new FloorService({ repository: orderRepository, menu: menuRepository, branches: portalRepository, idempotency });
-  const serviceRequests = new ServiceRequestService({ database, repository: orderRepository, branches: portalRepository });
-  const serviceSettings = new ServiceSettingsService({ database, repository: new ServiceSettingsRepository(sql) });
-  const diner = new DinerService({ database, repository: orderRepository, menu: menuRepository, entitlements });
+  const orders = new OrderService({ database, repository: orderRepository, live });
+  const floor = new FloorService({ repository: orderRepository, menu: menuRepository, branches: portalRepository, idempotency, live });
+  const serviceRequests = new ServiceRequestService({ database, repository: orderRepository, branches: portalRepository, live });
+  const serviceSettings = new ServiceSettingsService({ database, repository: new ServiceSettingsRepository(sql), live });
+  const diner = new DinerService({ database, repository: orderRepository, menu: menuRepository, entitlements, live });
 
   const portal = express.Router();
   portal.use(new PortalRouter({ controller: new PortalController({ portal: new PortalService({ repository: portalRepository }), accessOf: access.accessOf }) }).build());
@@ -136,8 +147,21 @@ export function createServices({ database, verifyToken, authAdmin, photoStorage,
   admin.use(new TenantRouter({ controller: new TenantController({ tenants, subscriptions, entitlements, branches }), access }).build());
   admin.use(new ConsoleRouter({ controller: new ConsoleController({ console: consoleService, catalog, partners }) }).build());
 
+  // Stage 6: the daily jobs (unpaid ladder, billing month and period, clean-ups).
+  const jobs = new JobService({
+    database, repository: new JobRepository(sql), tenants: tenantRepository, subscriptions: subscriptionRepository,
+    entitlements: new EntitlementRepository(sql), audit, photoStorage: storage, live,
+    mailer: mailer === undefined ? (settings.mail ? new SmtpMailer(settings.mail) : null) : mailer,
+  });
+  const liveLines = new LiveController({
+    hub: live, auth: authService, tables: orderRepository, branches: portalRepository, logger,
+    origins: settings.corsOrigins, trustProxyHops: settings.app.trustProxyHops, ...(livePingMs ? { pingMs: livePingMs } : {}),
+  });
+
   return {
     database,
+    jobs,
+    live: { hub: live, lines: liveLines },
     entitlements,
     audit,
     auth,

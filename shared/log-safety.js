@@ -1,13 +1,14 @@
 const errorTypes = new Set([
   'Error', 'TypeError', 'SyntaxError', 'RangeError', 'ReferenceError',
   'URIError', 'AggregateError', 'AbortError', 'TimeoutError', 'ApiError',
-  'AuthAdminError', 'PhotoStorageError', 'PostgresError',
+  'AuthAdminError', 'PhotoStorageError', 'PostgresError', 'MailError',
 ]);
 const errorCodes = new Set([
   'EADDRINUSE', 'EACCES', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND',
   'EAI_AGAIN', 'ETIMEDOUT', 'EPIPE', 'UND_ERR_CONNECT_TIMEOUT',
   'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET', 'CERT_HAS_EXPIRED',
   'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'EAUTH', 'ECONNECTION', 'EENVELOPE', 'EMESSAGE', 'ESOCKET', 'ETLS', 'EDNS',
   '23502', '23503', '23505', '23514', '42501', '40001', '40P01', '55P03',
   '57014', '28P01', '3D000', '42P01', '42703', '53300',
 ]);

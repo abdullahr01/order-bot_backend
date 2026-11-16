@@ -13,6 +13,10 @@
     "admin:create": "node scripts/admin-create.js",
     "check:signin": "node scripts/check-signin.js",
     "dev:password": "node scripts/dev-password.js",
+    "jobs:run": "node scripts/jobs-run.js",
+    "check:speed": "node scripts/check-speed.js",
+    "check:live": "node scripts/check-live.js",
+    "check:email": "node scripts/check-email.js",
     "start": "node main.js",
     "dev": "nodemon main.js"
   },
@@ -20,6 +24,9 @@
   "author": "",
   "license": "ISC",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
     "argon2": "^0.45.2",
@@ -29,10 +36,12 @@
     "express-rate-limit": "^8.7.1",
     "helmet": "^8.3.0",
     "jose": "^6.2.16",
+    "nodemailer": "^10.5.0",
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
     "postgres": "^4.0.0",
     "sharp": "^0.35.5",
+    "ws": "^8.23.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

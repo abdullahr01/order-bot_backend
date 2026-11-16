@@ -3,6 +3,7 @@ import { ServiceSettingsModel } from '../model/service-settings.model.js';
 import { defaultHours } from '../shared/rules/service.js';
 import { apiError } from '../shared/error-codes.js';
 import { parseOrThrow } from '../shared/validation.js';
+import { NO_LIVE } from './live.service.js';
 
 /** Longest pause a branch can set itself; anything longer is a closure, the owner's call. */
 const MAX_BRANCH_PAUSE_MS = 12 * 60 * 60 * 1000;
@@ -16,7 +17,10 @@ export class ServiceSettingsService {
   #database;
   #repository;
 
-  constructor({ database, repository }) {
+  #live;
+
+  constructor({ database, repository, live = NO_LIVE }) {
+    this.#live = live;
     this.#database = database;
     this.#repository = repository;
   }
@@ -43,6 +47,7 @@ export class ServiceSettingsService {
       });
     }, { logger: log });
     log.success({ tenantId: actor.tenantId, hours: Boolean(changes.hours), pause: changes.pausedUntil === undefined ? 'unchanged' : changes.pausedUntil ? 'paused' : 'resumed' }, 'Service settings saved');
+    this.#live.serviceUpdated({ tenantId: actor.tenantId });
     return this.settings(actor.tenantId);
   }
 
@@ -77,6 +82,7 @@ export class ServiceSettingsService {
     const { branch } = await this.today(context);
     await this.#database.withTx((tx) => this.#repository.pauseBranch(tx, actor.tenantId, branch.id, pausedUntil), { logger: log });
     log.success({ tenantId: actor.tenantId, branchId: branch.id, paused: pausedUntil !== null }, 'Branch pause saved');
+    this.#live.serviceUpdated({ tenantId: actor.tenantId, branchId: branch.id });
     return this.today(context);
   }
 }

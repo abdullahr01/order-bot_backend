@@ -16,6 +16,14 @@ test('health retains its contract and security headers', async (t) => {
   assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
   assert.ok(response.headers.get('content-security-policy'));
   assert.equal(response.headers.get('x-powered-by'), null);
+  assert.match(response.headers.get('server-timing'), /^app;dur=\d+\.\d$/, 'the server\'s own time, for check:speed');
+});
+
+test('errors carry the server\'s own time too', async (t) => {
+  const app = await serve(t);
+  const response = await app.request('/no-such-route');
+  assert.equal(response.status, 404);
+  assert.match(response.headers.get('server-timing'), /^app;dur=/);
 });
 
 test('unknown routes return safe contract errors without reflecting a path', async (t) => {

@@ -30,6 +30,14 @@ export function createRequestLogger(logger) {
   });
 
   return (request, response, next) => {
+    // How long the server itself took, so `npm run check:speed` can tell the server's
+    // time from the internet's (the 150 ms target is the server's).
+    const started = performance.now();
+    const writeHead = response.writeHead;
+    response.writeHead = function timedWriteHead(...args) {
+      if (!response.headersSent) response.setHeader('Server-Timing', `app;dur=${(performance.now() - started).toFixed(1)}`);
+      return writeHead.apply(this, args);
+    };
     httpLogger(request, response);
     request.log = request.log.child({ module: 'HTTP' });
     request.log.info({

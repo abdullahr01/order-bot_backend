@@ -7,6 +7,7 @@ import { TABLE_PAYMENTS } from '../shared/rules/constants.js';
 import { apiError } from '../shared/error-codes.js';
 import { isUuid } from '../shared/validation.js';
 import { priceLines } from './order-pricing.js';
+import { NO_LIVE } from './live.service.js';
 
 const NOT_FOUND = () => apiError('not_found', 'That table could not be found.');
 const fieldError = (message, fields) => apiError('validation_failed', message, fields);
@@ -21,7 +22,10 @@ export class FloorService {
   #branches;
   #idempotency;
 
-  constructor({ repository, menu, branches, idempotency }) {
+  #live;
+
+  constructor({ repository, menu, branches, idempotency, live = NO_LIVE }) {
+    this.#live = live;
     this.#repository = repository;
     this.#menu = menu;
     this.#branches = branches;
@@ -80,9 +84,10 @@ export class FloorService {
    * was asked for. Priced exactly as diner orders are. Created accepted: staff are at
    * the table. Recorded as entered by the person, which settles disputes over the bill.
    */
-  addOrder(context, access, { body = {}, key }) {
+  async addOrder(context, access, { body = {}, key }) {
     const { actor, log, now } = context;
-    return this.#idempotency.run(context, { key, method: 'POST', path: '/portal/dine-in/orders', body }, async (tx) => {
+    let placed = null;
+    const result = await this.#idempotency.run(context, { key, method: 'POST', path: '/portal/dine-in/orders', body }, async (tx) => {
       const table = await this.#table(tx, actor, body?.tableId, { lock: true });
       if (!table.active) throw NOT_FOUND();
       const notes = OrderModel.notes(body?.notes);
@@ -104,8 +109,12 @@ export class FloorService {
         enteredBy: 'staff', enteredByName: actor.name, history: [{ status: 'new', at }, { status: 'accepted', at }], now,
       });
       log.info({ tenantId: actor.tenantId, tableId: table.id, orderId: order.id, number, lines: items.length }, 'Staff order entered');
+      placed = { branchId: table.branch_id, tableId: table.id, orderId: order.id };
       return this.table(context, table.id, tx);
     });
+    // A replayed answer (same Idempotency-Key) placed nothing new, so announces nothing.
+    if (placed) this.#live.orderCreated(placed);
+    return result;
   }
 
   /**
@@ -113,9 +122,10 @@ export class FloorService {
    * looked at it); orders with a waiter count as served. Force closed: for a party that
    * left without paying; anything open is cancelled and lands in the void log.
    */
-  close(context, access, id, { body = {}, key }) {
+  async close(context, access, id, { body = {}, key }) {
     const { actor, log, now } = context;
-    return this.#idempotency.run(context, { key, method: 'POST', path: `/portal/dine-in/tables/${id}/close`, body }, async (tx) => {
+    let settled = null;
+    const result = await this.#idempotency.run(context, { key, method: 'POST', path: `/portal/dine-in/tables/${id}/close`, body }, async (tx) => {
       const table = await this.#table(tx, actor, id, { lock: true });
       const session = await this.#repository.openSession(tx, actor.tenantId, table.id);
       if (!session) throw apiError('no_session', `Table ${table.number} is already free.`);
@@ -138,7 +148,10 @@ export class FloorService {
         throw fieldError('Check the highlighted fields.', { outcome: 'Choose paid or closed without payment.' });
       }
       log.info({ tenantId: actor.tenantId, tableId: table.id, outcome: closed.closed_as, amountPaid: closed.amount_paid }, 'Table settled');
+      settled = { branchId: table.branch_id, tableId: table.id };
       return this.table(context, table.id, tx, { session: closed });
     });
+    if (settled) this.#live.sessionUpdated(settled);
+    return result;
   }
 }

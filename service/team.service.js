@@ -5,6 +5,7 @@ import { COUNTER_PIN_LENGTH } from '../shared/rules/constants.js';
 import { hashPin } from '../shared/crypto.js';
 import { apiError } from '../shared/error-codes.js';
 import { isUuid, parseOrThrow } from '../shared/validation.js';
+import { NO_LIVE } from './live.service.js';
 
 const fieldError = (fields) => apiError('validation_failed', 'Check the highlighted fields.', fields);
 const EMAIL_TAKEN = () => fieldError({ email: 'This email already has an account.' });
@@ -24,7 +25,10 @@ export class TeamService {
   #authAdmin;
   #portalUrl;
 
-  constructor({ database, repository, tenants, branches, authAdmin, portalUrl }) {
+  #live;
+
+  constructor({ database, repository, tenants, branches, authAdmin, portalUrl, live = NO_LIVE }) {
+    this.#live = live;
     this.#database = database;
     this.#repository = repository;
     this.#tenants = tenants;
@@ -114,6 +118,8 @@ export class TeamService {
       throw error;
     }
     log.success({ tenantId: actor.tenantId, memberId: id, movedBranch: Boolean(movedInAuth) }, 'Staff member updated');
+    // Their sign-in no longer matches their branch: live lines close, the app reconnects after refreshing.
+    if (movedInAuth) this.#live.userRemoved({ tenantId: actor.tenantId, userId: id });
     return this.team(context, access);
   }
 
@@ -131,6 +137,7 @@ export class TeamService {
       log.error({ tenantId: actor.tenantId, memberId: id, err: error }, 'Staff removed, but their login could not be deleted; remove it in Supabase');
     });
     log.success({ tenantId: actor.tenantId, memberId: id }, 'Staff member removed');
+    this.#live.userRemoved({ tenantId: actor.tenantId, userId: id });
     return this.team(context, access);
   }
 

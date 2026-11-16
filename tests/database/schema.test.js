@@ -29,18 +29,20 @@ async function rejected(tx, work, code) {
 }
 const token = () => randomBytes(24).toString('base64url');
 
-test('all 35 tables have RLS and only the API connection can reach them', async () => {
+test('all 36 tables have RLS and only the API connection can reach them', async () => {
   const rows = await database.sql`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'dinein' and c.relkind = 'r'`;
-  assert.equal(rows.length, 35);
+  assert.equal(rows.length, 36);
   assert.ok(rows.some((row) => row.relname === 'idempotency_keys'), 'the Idempotency-Key table (Stage 4)');
+  assert.ok(rows.some((row) => row.relname === 'job_runs'), 'the notebook of the daily jobs (Stage 6)');
   assert.ok(rows.every((row) => row.relrowsecurity));
   const [privileges] = await database.sql`select
     has_schema_privilege('anon','dinein','USAGE') as anon,
     has_schema_privilege('authenticated','dinein','USAGE') as authenticated,
     has_table_privilege('service_role','dinein.orders','SELECT') as service_role,
-    has_table_privilege('service_role','dinein.idempotency_keys','SELECT') as service_role_keys`;
-  assert.deepEqual({ ...privileges }, { anon: false, authenticated: false, service_role: false, service_role_keys: false });
+    has_table_privilege('service_role','dinein.idempotency_keys','SELECT') as service_role_keys,
+    has_table_privilege('service_role','dinein.job_runs','SELECT') as service_role_jobs`;
+  assert.deepEqual({ ...privileges }, { anon: false, authenticated: false, service_role: false, service_role_keys: false, service_role_jobs: false });
 });
 
 test('each country has its own catalogue: Pakistan confirmed, UK prices still placeholders', async () => {

@@ -70,13 +70,39 @@ try {
   throw new Error('PORTAL_URL must be an HTTP or HTTPS URL without credentials, query or fragment.');
 }
 
+const environment = process.env.NODE_ENV?.trim() || 'development';
+
+// Our own emails (the unpaid reminders). Supabase's SMTP setting only sends its sign-in
+// emails. All of these or none: without SMTP_HOST the jobs log "email skipped".
+let mail = null;
+const smtpHost = process.env.SMTP_HOST?.trim();
+if (smtpHost) {
+  const smtpPort = Number(process.env.SMTP_PORT?.trim() || 587);
+  if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535) {
+    throw new Error('SMTP_PORT must be a whole number between 1 and 65535.');
+  }
+  const from = required('MAIL_FROM');
+  if (!/^[^<>\r\n]*<?[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+>?$/.test(from)) {
+    throw new Error('MAIL_FROM must be an email address, optionally with a name: QR Dine-in <name@example.com>.');
+  }
+  mail = Object.freeze({ host: smtpHost, port: smtpPort, user: required('SMTP_USER'), password: required('SMTP_PASSWORD'), from });
+}
+
+// The daily jobs (9 am Pakistan and UK time). On by default only in production, so a
+// developer's `npm run dev` never suspends or emails anyone by surprise.
+const jobsSetting = process.env.JOBS_ENABLED?.trim().toLowerCase();
+if (jobsSetting && !['true', 'false'].includes(jobsSetting)) throw new Error('JOBS_ENABLED must be true or false.');
+const jobsEnabled = jobsSetting ? jobsSetting === 'true' : environment === 'production';
+
 export const settings = Object.freeze({
   app: Object.freeze({
     name: 'orderbot-backend',
-    environment: process.env.NODE_ENV?.trim() || 'development',
+    environment,
     port,
     trustProxyHops,
   }),
+  mail,
+  jobsEnabled,
   supabase: Object.freeze({
     url: supabaseUrl,
     // Server only: Auth admin and Storage.

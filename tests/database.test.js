@@ -25,6 +25,15 @@ test('hosted TLS cannot be disabled through config or URI query parameters', () 
   assert.equal(databaseConfig({ DATABASE_URL: 'postgres://user:pass@127.0.0.1/db', DATABASE_SSL_MODE: 'disable' }).options.ssl, false);
 });
 
+test('a hosted database uses the bundled Supabase certificate; a relative path is read from the backend folder', () => {
+  const bundled = databaseConfig({ DATABASE_URL: uri }).options.ssl.ca;
+  assert.match(bundled, /^-----BEGIN CERTIFICATE-----/);
+  assert.equal(databaseConfig({ DATABASE_URL: uri, DATABASE_CA_CERT_PATH: 'certs/supabase-ca-2021.crt' }).options.ssl.ca, bundled);
+  assert.equal(databaseConfig({ DATABASE_URL: uri, DATABASE_CA_CERT_PATH: './certs/supabase-ca-2021.crt' }).options.ssl.ca, bundled);
+  assert.throws(() => databaseConfig({ DATABASE_URL: uri, DATABASE_CA_CERT_PATH: 'certs/missing.crt' }), /readable CA certificate/);
+  assert.equal(databaseConfig({ DATABASE_URL: 'postgres://user:pass@127.0.0.1/db', DATABASE_SSL_MODE: 'disable' }).options.ssl, false);
+});
+
 test('development commands reject production and a mismatched Supabase database', () => {
   const env = { SUPABASE_URL: 'https://projectref.supabase.co', DATABASE_URL: 'postgresql://postgres:pass@db.projectref.supabase.co/postgres' };
   assert.doesNotThrow(() => assertDevelopmentTarget(env));

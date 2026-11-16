@@ -253,8 +253,8 @@ export class OrderRepository {
     const rows = await tx`
       update dinein.service_requests set handled_at = coalesce(handled_at, ${now}), handled_by = coalesce(handled_by, ${by})
       where tenant_id = ${tenantId} and branch_id = any(${branchIds}::uuid[]) and id = ${id}
-      returning id`;
-    return rows.length === 1;
+      returning id, branch_id, table_id`;
+    return rows[0] ?? null;
   }
 
   // ---------------------------------------------------------------- Diner page

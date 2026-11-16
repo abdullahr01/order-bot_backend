@@ -1,4 +1,11 @@
 import { readFileSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Supabase's public root certificate (no secret), committed so a host like Railway
+// can verify the database without a file of its own.
+const BUNDLED_CA = fileURLToPath(new URL('../certs/supabase-ca-2021.crt', import.meta.url));
+const backendPath = (path) => (isAbsolute(path) ? path : fileURLToPath(new URL(`../${path.replace(/^\.\//, '')}`, import.meta.url)));
 
 export function databaseConfig(env = process.env) {
   const connectionString = env.DATABASE_URL?.trim();
@@ -23,8 +30,11 @@ export function databaseConfig(env = process.env) {
   const max = Number(env.DATABASE_POOL_MAX ?? 5);
   if (!Number.isInteger(max) || max < 1 || max > 20) throw new Error('DATABASE_POOL_MAX must be between 1 and 20.');
   let ca;
-  if (env.DATABASE_CA_CERT_PATH) {
-    try { ca = readFileSync(env.DATABASE_CA_CERT_PATH, 'utf8'); }
+  // A relative path is read from the backend folder. Hosted databases default to the
+  // bundled Supabase certificate.
+  const caPath = env.DATABASE_CA_CERT_PATH?.trim() ? backendPath(env.DATABASE_CA_CERT_PATH.trim()) : (local ? null : BUNDLED_CA);
+  if (caPath) {
+    try { ca = readFileSync(caPath, 'utf8'); }
     catch { throw new Error('DATABASE_CA_CERT_PATH must identify a readable CA certificate.'); }
   }
   parsed.search = ''; // Explicit options below take precedence over URI sslmode.

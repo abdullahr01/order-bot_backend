@@ -1,6 +1,7 @@
 import { OrderModel } from '../model/order.model.js';
 import { apiError } from '../shared/error-codes.js';
 import { isUuid } from '../shared/validation.js';
+import { NO_LIVE } from './live.service.js';
 
 /** How many requests already seen to the board keeps showing, so a mistaken tap can be spotted. */
 const RECENT = 8;
@@ -11,7 +12,10 @@ export class ServiceRequestService {
   #repository;
   #branches;
 
-  constructor({ database, repository, branches }) {
+  #live;
+
+  constructor({ database, repository, branches, live = NO_LIVE }) {
+    this.#live = live;
     this.#database = database;
     this.#repository = repository;
     this.#branches = branches;
@@ -36,6 +40,7 @@ export class ServiceRequestService {
     );
     if (!found) throw apiError('not_found', 'That request could not be found.');
     log.success({ tenantId: actor.tenantId, requestId: id }, 'Request seen to');
+    this.#live.requestHandled({ branchId: found.branch_id, tableId: found.table_id, requestId: id });
     return this.list(context, query);
   }
 }

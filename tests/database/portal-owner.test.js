@@ -4,7 +4,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { openHarness } from './api-harness.js';
-import { dayKey, monthKey } from '../../shared/time.js';
+import { dayKey, monthKey, startOfLocalDay } from '../../shared/time.js';
 
 const harness = openHarness();
 after(() => harness.close());
@@ -52,7 +52,11 @@ test('the dashboard and the daily summary add up today, against yesterday and th
   await order(api, id, mainBranchId, { status: 'cancelled', total: 300 });
   await order(api, id, mainBranchId, { status: 'new', total: 200 });
   await order(api, id, mainBranchId, { at: new Date(now.getTime() - DAY), total: 800 });
-  await order(api, id, mainBranchId, { at: new Date(now.getTime() - 7 * DAY - HOUR), total: 600 });
+  // Earlier on the same day last week: halfway between its midnight and this time of day
+  // (a fixed hour earlier falls on the day before when the test runs just after midnight).
+  const sameTimeLastWeek = new Date(now.getTime() - 7 * DAY);
+  const lastWeekMidnight = startOfLocalDay(sameTimeLastWeek, 'Asia/Karachi').getTime();
+  await order(api, id, mainBranchId, { at: new Date((lastWeekMidnight + sameTimeLastWeek.getTime()) / 2), total: 600 });
   await order(api, id, mainBranchId, { at: new Date(now.getTime() - 7 * DAY + HOUR), total: 9999 });
   const owner = (path) => api.call('GET', `/portal${path}`, { token: ownerToken });
 

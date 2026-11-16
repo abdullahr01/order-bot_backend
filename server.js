@@ -3,8 +3,13 @@ import { settings } from './shared/settings.js';
 
 const logger = baseLogger.child({ module: 'Server' });
 
-/** Checks the database, then listens. Never reports ready before the listener really is. */
-export async function startServer({ app, probe, close = async () => {} }) {
+/**
+ * Checks the database, then listens. Never reports ready before the listener really is.
+ * `attach` adds the live line to the HTTP server; `onListening` starts the daily jobs;
+ * `beforeClose` tells live lines to reconnect, since an open websocket would hold the
+ * server open.
+ */
+export async function startServer({ app, probe, close = async () => {}, attach = () => {}, onListening = () => {}, beforeClose = async () => {} }) {
   let server;
   let shuttingDown = false;
 
@@ -18,7 +23,9 @@ export async function startServer({ app, probe, close = async () => {} }) {
       return;
     }
 
-    server.close(async (error) => {
+    Promise.resolve().then(beforeClose).catch((error) => {
+      logger.error({ operation: 'shutdown', err: error }, 'Live lines could not close cleanly');
+    }).finally(() => server.close(async (error) => {
       try {
         await close();
       } catch (closeError) {
@@ -31,7 +38,7 @@ export async function startServer({ app, probe, close = async () => {} }) {
         return;
       }
       logger.success({ operation: 'shutdown' }, 'HTTP server closed cleanly');
-    });
+    }));
   }
 
   process.on('SIGINT', () => shutdown('SIGINT'));
@@ -46,6 +53,7 @@ export async function startServer({ app, probe, close = async () => {} }) {
 
     await new Promise((resolve, reject) => {
       server = app.listen(settings.app.port);
+      attach(server);
       server.once('error', reject);
       server.once('listening', () => {
         server.removeListener('error', reject);
@@ -58,6 +66,7 @@ export async function startServer({ app, probe, close = async () => {} }) {
       });
     });
     logger.success({ operation: 'listen', port: settings.app.port }, 'Backend server is listening');
+    onListening(server);
   } catch (error) {
     logger.error({ operation: 'start', err: error }, 'Backend startup failed');
     process.exitCode = 1;

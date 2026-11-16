@@ -4,6 +4,7 @@ import { MenuModel } from '../model/menu.model.js';
 import { can } from '../shared/rules/access.js';
 import { apiError } from '../shared/error-codes.js';
 import { isUuid, parseOrThrow } from '../shared/validation.js';
+import { NO_LIVE } from './live.service.js';
 
 const SETUP_LOCKED_MESSAGE = 'Your payment is overdue, so the menu, tables and team can’t be changed. Call us to sort it out.';
 const fieldError = (fields) => apiError('validation_failed', 'Check the highlighted fields.', fields);
@@ -25,7 +26,10 @@ export class MenuService {
   #repository;
   #supabaseUrl;
 
-  constructor({ database, repository, supabaseUrl }) {
+  #live;
+
+  constructor({ database, repository, supabaseUrl, live = NO_LIVE }) {
+    this.#live = live;
     this.#database = database;
     this.#repository = repository;
     this.#supabaseUrl = supabaseUrl;
@@ -45,9 +49,10 @@ export class MenuService {
   /** Runs one menu change in a transaction, then returns the new menu. */
   async #write({ actor, log }, access, operation, work) {
     const tenantId = actor.tenantId;
+    let version;
     try {
       await this.#database.withTx(async (tx) => {
-        const version = await this.#repository.bumpVersion(tx, tenantId);
+        version = await this.#repository.bumpVersion(tx, tenantId);
         await work(tx, tenantId);
         log.info({ tenantId, version }, 'Menu change ready to save');
       }, { logger: log });
@@ -57,6 +62,7 @@ export class MenuService {
       throw error;
     }
     log.success({ tenantId, operation }, 'Menu saved');
+    this.#live.menuUpdated({ tenantId, version });
     return this.menu(tenantId, access);
   }
 

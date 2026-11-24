@@ -169,12 +169,12 @@ export const STATUS_INFO = {
   },
   past_due: {
     label: "Past due",
-    effect: "Reminder at day 7, portal banner at day 15, reports and setup locked at day 30, warning at day 43, suspended at day 45.",
+    effect: "Reminder at day 7, portal banner at day 15, reports locked and no changes to the menu, tables or team at day 30, a warning at day 43, suspended at day 45. Staff keep running the service until then.",
     destructive: false
   },
   suspended: {
     label: "Suspended",
-    effect: "Diner ordering stops, and the portal and counter become read-only.",
+    effect: "Open orders are cancelled and open tables closed at once; then diners can’t order and the portal and counter are read-only. A payment doesn’t lift it: switch it back on by hand.",
     destructive: true
   },
   cancelled: {

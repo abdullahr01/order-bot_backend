@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { PLANS } from "../../shared/rules/plans.js";
-import { explainEntitlements, listPrice, monthlyValue, nextPastDueStep, pastDueStep, resolveEntitlements } from "../../shared/rules/entitlements.js";
+import { explainEntitlements, isSetupLocked, listPrice, monthlyValue, nextPastDueStep, PAST_DUE_LADDER, pastDueStep, resolveEntitlements } from "../../shared/rules/entitlements.js";
 const NOW = new Date("2026-10-06T12:00:00Z");
 const DAY = 24 * 60 * 60 * 1000;
 const iso = (offsetDays)=>new Date(NOW.getTime() + offsetDays * DAY).toISOString();
@@ -242,21 +242,27 @@ describe("subscription status (Business Plan 8.11)", ()=>{
       ...PLANS.growth.features
     ].sort());
   });
-  it("from day 30 reports lock; ordering and the counter carry on", ()=>{
+  it("from day 30 reports and setup lock; ordering and the counter carry on", ()=>{
     const f = features(sub("growth", "past_due", 31));
     assert.ok(!f.has("reports_basic") && !f.has("reports_full") && !f.has("leak_reconciliation"));
     assert.ok(f.has("qr_ordering") && f.has("kot_printing") && f.has("offline_counter") && f.has("cash_close"));
+    assert.equal(isSetupLocked(sub("growth", "past_due", 31), NOW), true);
+    assert.equal(isSetupLocked(sub("growth", "past_due", 29), NOW), false);
   });
-  it("from day 45 diner QR ordering pauses too, but never the counter", ()=>{
-    const f = features(sub("growth", "past_due", 46));
-    assert.ok(!f.has("qr_ordering") && !f.has("bill_request") && !f.has("quick_requests"));
-    assert.ok(f.has("kot_printing") && f.has("offline_counter") && f.has("void_log"));
+  it("day 45 is a suspension: nothing works, the counter included", ()=>{
+    assert.equal(features(sub("growth", "past_due", 46)).size, 0);
+    assert.ok(features(sub("growth", "past_due", 44)).has("qr_ordering"));
   });
   it("the ladder says where the restaurant is and what comes next", ()=>{
     assert.equal(pastDueStep(sub("starter", "past_due", 3), NOW), null);
     assert.deepEqual(nextPastDueStep(sub("starter", "past_due", 3), NOW)?.inDays, 4);
     assert.equal(pastDueStep(sub("starter", "past_due", 16), NOW)?.label, "Portal banner");
     assert.equal(nextPastDueStep(sub("starter", "past_due", 16), NOW)?.step.label, "Reports and setup locked");
+    assert.equal(nextPastDueStep(sub("starter", "past_due", 40), NOW)?.step.label, "Suspension warning");
+    assert.deepEqual(nextPastDueStep(sub("starter", "past_due", 43), NOW), {
+      step: PAST_DUE_LADDER[4],
+      inDays: 2
+    });
     assert.equal(nextPastDueStep(sub("starter", "past_due", 50), NOW), null);
     assert.equal(nextPastDueStep(sub("starter"), NOW), null);
   });

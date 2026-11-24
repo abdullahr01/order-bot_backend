@@ -1,11 +1,13 @@
 // Ported from the partner's packages/core/src/entitlements. Keep the two in step.
 import { FEATURES, FEATURE_KEYS } from "./features.js";
 import { addonUnitPrice, DEFAULT_CATALOG, LIMIT_KEYS } from "./plans.js";
+// The founders' ladder (2026-11-09), as core states it since its update of 2026-11-22.
+// Until day 45 staff keep running the service; on day 45 the restaurant is suspended.
 export const PAST_DUE_LADDER = [
   {
     day: 7,
     label: "Reminder",
-    effect: "A payment reminder goes to the owner.",
+    effect: "A payment reminder is emailed to the owner.",
     locks: []
   },
   {
@@ -17,7 +19,7 @@ export const PAST_DUE_LADDER = [
   {
     day: 30,
     label: "Reports and setup locked",
-    effect: "Reports lock, and menu, tables and team become read-only.",
+    effect: "Reports are locked, and the owner can’t change the menu, tables or team. Staff keep running the service.",
     locks: [
       "reports_basic",
       "reports_full",
@@ -25,20 +27,17 @@ export const PAST_DUE_LADDER = [
       "leak_reconciliation"
     ]
   },
-  // Days 43 and 45 are the founders' decision (2026-11-09); core still needs updating to match.
   {
     day: 43,
     label: "Suspension warning",
-    effect: "Service will be suspended in 2 days unless the payment arrives.",
+    effect: "The owner is warned that service will be suspended in 2 days.",
     locks: []
   },
   {
     day: 45,
     label: "Suspended",
-    effect: "Open orders are cancelled and the restaurant is suspended.",
-    locks: [
-      "qr_ordering"
-    ]
+    effect: "The restaurant is suspended: open orders are cancelled, open tables closed, and everything becomes read-only.",
+    locks: []
   }
 ];
 export const SETUP_LOCK_DAY = 30;
@@ -80,6 +79,8 @@ function blockedByStatus(key, subscription, now) {
     case "past_due":
       {
         const days = daysPastDue(subscription, now);
+        // Day 45 is a suspension, even before the daily job has changed the status.
+        if (days >= SUSPEND_DAY) return true;
         return PAST_DUE_LADDER.some((step)=>days >= step.day && step.locks.includes(key));
       }
     case "suspended":

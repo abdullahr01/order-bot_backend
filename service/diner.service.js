@@ -69,7 +69,8 @@ export class DinerService {
     const page = await this.#repository.dinerPage(row.tenant_id, row.session?.id ?? null);
     const orders = page.orders;
     return {
-      restaurant: { name: row.business_name, city: row.city },
+      // Prices on the page are in this currency. No logo upload yet: null shows the initials.
+      restaurant: { name: row.business_name, city: row.city, logoUrl: null, currency: access.tenant.currency },
       branch: { name: row.branch_name, isMain: row.is_main },
       table: { number: row.number, label: row.label },
       ordering: DinerService.ordering(row, access, now),

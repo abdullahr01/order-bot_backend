@@ -37,6 +37,9 @@ test('a whole evening: scan, order, waiter, more rounds, requests, bill, payment
   assert.equal(page.status, 200);
   assert.deepEqual([page.body.ordering, page.body.table, page.body.bill.orders], [{ state: 'open' }, { number: 4, label: null }, []]);
   assert.deepEqual(Object.keys(page.body).sort(), ['bill', 'branch', 'features', 'generatedAt', 'menu', 'openRequests', 'ordering', 'restaurant', 'table']);
+  const { name: restaurantName, ...restaurant } = page.body.restaurant;
+  assert.match(restaurantName, /^Stage3 Test /);
+  assert.deepEqual(restaurant, { city: 'Rawalpindi', logoUrl: null, currency: 'PKR' }, 'prices in rupees; no logo yet, so initials');
   assert.ok(!JSON.stringify(page.body).includes(karahi.tenantId), 'no restaurant id on the diner page');
   assert.ok(!JSON.stringify(page.body).includes('Rabia'), 'no staff names');
 
@@ -117,6 +120,11 @@ test('a whole evening: scan, order, waiter, more rounds, requests, bill, payment
 test('the diner page: closed, paused, unavailable; dishes, options, menus by time; the prank limit', () => harness.run(async (api) => {
   const { id, owner, ownerToken, karahi, naan, category, table, waiter, diner, counter } = await evening(api);
   const line = (overrides = {}) => ({ clientRef: randomUUID(), items: [{ menuItemId: naan.id, quantity: 1, ...overrides }] });
+
+  // A UK table's prices are in pounds.
+  const uk = await api.restaurant({ country: 'GB', city: 'London', ownerPhone: '07700 900123' });
+  const ukTable = (await api.call('POST', '/portal/dine-in/tables', { token: uk.ownerToken, body: { number: 1, seats: 2, branchId: uk.mainBranchId } })).body.tables[0];
+  assert.deepEqual((await api.call('GET', `/public/tables/${ukTable.token}`)).body.restaurant.currency, 'GBP');
   const refused = async (body) => (await diner('POST', '/orders', body)).body;
 
   assert.equal((await refused({ clientRef: randomUUID(), items: [] })).fields.items, 'Add at least one dish.');
